@@ -2,8 +2,6 @@
 
 Intelligent **mpv** script that automatically analyzes video bitrate, resolution, codec, bit depth, HDR type, frame rate and content type, then applies the most suitable quality profile. It also provides a detailed custom OSD with real-time information.
 
-**Primarily tuned for 1080p projectors**, but fully supports 4K (2160p) profiles as well. You can freely adjust thresholds and factors for any display.
-
 ## What the script does
 
 On every file load the script:
