@@ -1849,7 +1849,7 @@ Because the script only *selects* profiles, you have full control over the actua
 
 <img width="2836" height="904" alt="osd-2" src="https://github.com/user-attachments/assets/df3012dd-a523-43e6-82b7-b0be7cdf2eac" />
 
-## Sample mpv.conf
+## Sample mpv.conf (e.g., for my 1080p PJ)
 
 <details>
 <br>
