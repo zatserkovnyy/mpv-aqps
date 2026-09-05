@@ -2043,5 +2043,6 @@ Drop the script in, define your preferred profiles in `mpv.conf`, and mpv will a
 
 ## Support
 
-If you find this script useful, you can support my work with a voluntary donation. I truly love coffee but honestly can't afford to buy it right now, so any support would genuinely buy my next cup! ❤️
-[**Support via DonationAlerts**](https://www.donationalerts.com/r/zatserkovnyy)
+If you find this script useful, you can support my work with a voluntary donation. If you'd like to fuel my coding with a warm cup of coffee, any support is greatly appreciated! ❤️
+
+[![DonationAlerts](https://img.shields.io/badge/Support-DonationAlerts-orange?style=for-the-badge&logo=coffee)](https://www.donationalerts.com/r/zatserkovnyy)
