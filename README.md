@@ -115,7 +115,7 @@ For example, at 2160p:
 |-------|-------:|
 | H.264 / AVC1 | 2.50 |
 | HEVC / H.265 | 1.00 |
-| VP8 | 2.80 |
+| VP8 | 3.15 |
 | VP9 | 1.20 |
 | AV1 | 0.65 |
 
@@ -259,6 +259,7 @@ If a valid bitrate is available, it is used directly.
 If the actual bitrate is unavailable, the script estimates it from:
 
 - Codec
+- Codec profile (for accurate DTS-HD Master Audio detection)
 - Channel count
 - Sample rate
 - Track information
@@ -353,13 +354,11 @@ The OSD uses a `~` prefix when the bitrate is estimated.
 
 ---
 
-# 9. URL / YouTube Handling
+# 9. Network Stream / YouTube Handling
 
-The script does not attempt to use FFprobe for HTTP/HTTPS URLs.
+The script explicitly checks for `youtube.com` and `youtu.be` URLs. For these YouTube streams, it uses a separate profile-selection path and does not attempt to use FFprobe.
 
-For URL-based playback, it uses a separate profile-selection path.
-
-The selected profile is based on video height:
+Regular HTTP/HTTPS network streams (such as direct links, Plex, or Jellyfin) are now treated as standard files, allowing the script to accurately estimate their bitrate instead of blindly applying YouTube profiles.
 
 ```text
 >1080p  → YouTube UHD
@@ -417,53 +416,19 @@ Bitrate and FPS information can still be collected for OSD/debugging purposes, b
 
 # 12. Resolution Classification
 
-The script maps the actual video resolution into four categories.
+The script maps the actual video resolution into four categories based on the frame's total pixel area.
 
 ### 2160p
-
-If:
-
-```text
-width > 1920
-```
-
-or:
-
-```text
-height > 1080
-```
+If the frame area > 2.5 MP (e.g., > 2,500,000 pixels). This includes 1440p, 4K and higher.
 
 ### 1080p
-
-If either dimension is:
-
-```text
-1920
-```
-
-or:
-
-```text
-1080
-```
+If the frame area > 1.3 MP (e.g., > 1,300,000 pixels). This intelligently catches cropped ultra-wide formats like 1920x800 and 1440x1080.
 
 ### 720p
-
-If either dimension is at least:
-
-```text
-960
-```
-
-or:
-
-```text
-540
-```
+If the frame area > 0.64 MP (e.g., > 640,000 pixels). This reliably catches 1280x536 and 960x720, while explicitly excluding PAL/DVD 1024x576.
 
 ### 480p
-
-Everything below the 720p classification.
+Everything below the 720p classification (DVD, 540p, 480p).
 
 The resolution category determines which:
 
