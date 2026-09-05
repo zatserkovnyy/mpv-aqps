@@ -2,7 +2,7 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.0.0
+-- Version: 1.1.0
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
@@ -28,7 +28,7 @@ local CODEC_EQUIV_FACTOR_2160 = {
     hevc = 1.00,
     h265 = 1.00,
     hev1 = 1.00,
-    vp8 = 2.80,
+    vp8 = 3.15,
     vp9 = 1.20,
     av1 = 0.65
 }
@@ -39,7 +39,7 @@ local CODEC_EQUIV_FACTOR_1080 = {
     hevc = 0.55,
     h265 = 0.55,
     hev1 = 0.55,
-    vp8 = 0.80,
+    vp8 = 1.20,
     vp9 = 0.60,
     av1 = 0.42
 }
@@ -50,7 +50,7 @@ local CODEC_EQUIV_FACTOR_720 = {
     hevc = 0.65,
     h265 = 0.65,
     hev1 = 0.65,
-    vp8 = 0.85,
+    vp8 = 1.15,
     vp9 = 0.70,
     av1 = 0.48
 }
@@ -61,7 +61,7 @@ local CODEC_EQUIV_FACTOR_480 = {
     hevc = 0.70,
     h265 = 0.70,
     hev1 = 0.70,
-    vp8 = 0.90,
+    vp8 = 1.10,
     vp9 = 0.75,
     av1 = 0.50
 }
@@ -179,34 +179,37 @@ local function calculate_audio_bitrate(track)
     end
 
     local codec = (track.codec or ""):lower()
+    local c_profile = (track["codec-profile"] or ""):lower()
+    local codec_info = codec .. " " .. c_profile
     local channels = tonumber(track["audio-channels"]) or tonumber(track["demux-channels"]) or 2
     local sr = tonumber(track["sample-rate"]) or 48000
     local freq_factor = sr / 48000
     local abr = nil
 
-    if codec:find("truehd") or codec:find("mlp") then
+    if codec_info:find("truehd") or codec_info:find("mlp") then
         abr = BASE_AUDIO_BITRATES.truehd * channels
-    elseif codec:find("dts%-hd") or codec:find("dtshd") then
+    elseif codec_info:find("dts%-hd") or codec_info:find("dtshd") or codec_info:find("dts%-ma") or
+        codec_info:find("hdma") then
         abr = BASE_AUDIO_BITRATES["dts-hd"] * channels
-    elseif codec:find("flac") then
+    elseif codec_info:find("flac") then
         abr = BASE_AUDIO_BITRATES.flac * channels
-    elseif codec:find("alac") then
+    elseif codec_info:find("alac") then
         abr = BASE_AUDIO_BITRATES.alac * channels
-    elseif codec:find("pcm") then
+    elseif codec_info:find("pcm") then
         abr = BASE_AUDIO_BITRATES.pcm * channels
-    elseif codec:find("dts") then
+    elseif codec_info:find("dts") then
         abr = (channels <= 2) and BASE_AUDIO_BITRATES.dts.stereo or BASE_AUDIO_BITRATES.dts.multichannel
-    elseif codec:find("eac3") then
+    elseif codec_info:find("eac3") then
         abr = BASE_AUDIO_BITRATES.eac3
-    elseif codec:find("ac3") then
+    elseif codec_info:find("ac3") then
         abr = BASE_AUDIO_BITRATES.ac3
-    elseif codec:find("mp3") then
+    elseif codec_info:find("mp3") then
         abr = BASE_AUDIO_BITRATES.mp3
-    elseif codec:find("vorbis") then
+    elseif codec_info:find("vorbis") then
         abr = BASE_AUDIO_BITRATES.vorbis
-    elseif codec:find("aac") then
+    elseif codec_info:find("aac") then
         abr = BASE_AUDIO_BITRATES.aac
-    elseif codec:find("opus") then
+    elseif codec_info:find("opus") then
         abr = BASE_AUDIO_BITRATES.opus
     end
 
@@ -228,7 +231,6 @@ end
 -- ======================================
 
 -- Bitrate formatting
-
 local function fmt_bitrate(val)
     return string.format("%.1f", math.floor((val or 0) * 10 + 0.5) / 10)
 end
@@ -265,6 +267,88 @@ local function get_cached_audio_bitrate(track)
     audio_bitrate_cache[track.id] = result
 
     return result
+end
+
+-- Build OSD profile text
+local function build_profile_osd_string(profile)
+    local avg_bitrate = state.avg_video_bitrate
+    local video_bitrate_source = state.video_bitrate_source or "n/a"
+    local prefix = (video_bitrate_source == "calc") and "~" or ""
+    local avg_text = avg_bitrate and fmt_bitrate(avg_bitrate) or "n/a"
+    local osd_hdr_text = " " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")
+
+    if profile == "hdtv" then
+        local bitrate_display = avg_text
+        local filename = (state.video_path or ""):lower()
+        local is_hdtv = filename:find("hdtv")
+
+        if state.is_cartoon and (state.cartoon_multiplier or 1.0) > 1.0 then
+            local orig_text = fmt_bitrate(avg_bitrate / state.cartoon_multiplier)
+            local applied_text = fmt_bitrate(avg_bitrate)
+            bitrate_display = string.format("%s (%s*c)", orig_text, applied_text)
+        elseif state.fps_adjust_coeff and state.fps_adjust_coeff > 1.0 and not state.is_cartoon and not is_hdtv then
+            local orig_text = fmt_bitrate(state.orig_video_bitrate)
+            bitrate_display = string.format("%s (%s*f)", orig_text, avg_text)
+        end
+        return
+            string.format("%s [%s%s Mbps @ %s]", string.upper(profile), prefix, bitrate_display, video_bitrate_source)
+    end
+
+    local x = state.raw_video_bitrate or 0
+    local x_text = fmt_bitrate(x)
+    local dw, dh = mp.get_property_number("width", 0), mp.get_property_number("height", 0)
+
+    -- Local fallback functions for scope inside helper
+    local function get_video_codec_and_depth_local()
+        local codec = (mp.get_property("video-codec") or ""):lower()
+        local vp = mp.get_property_native("video-params") or {}
+        local vo = mp.get_property_native("video-out-params") or {}
+        local vt = nil
+        local tracks = mp.get_property_native("track-list") or {}
+        for _, t in ipairs(tracks) do
+            if t.type == "video" and t.selected then
+                vt = t
+                break
+            end
+        end
+        vt = vt or {}
+        local depth = tonumber(vp["bit-depth"]) or tonumber(vo["bit-depth"]) or tonumber(vt["bit-depth"])
+        if not depth then
+            local pf = (vt["codec-profile"] or vt["profile"] or ""):lower()
+            if pf:find("10") then
+                depth = 10
+            elseif pf:find("12") then
+                depth = 12
+            end
+        end
+        if not depth then
+            local pf = (vo.pixelformat or vp.pixelformat or ""):lower()
+            if pf:match("p010") or pf:match("10le") or pf:match("10be") then
+                depth = 10
+            elseif pf:match("p012") or pf:match("12le") or pf:match("12be") then
+                depth = 12
+            elseif pf:match("p016") or pf:match("16le") or pf:match("16be") then
+                depth = 16
+            else
+                depth = 8
+            end
+        end
+        return codec, depth or 8
+    end
+
+    local codec, bit_depth = get_video_codec_and_depth_local()
+    local depth_mult = BIT_DEPTH_MULTIPLIER[bit_depth] or 1.00
+    local codec_div = 1.0
+    if state.cartoon_multiplier then
+    end
+
+    local cartoon_mult = state.cartoon_multiplier or 1.0
+    local fps_mult = 1.0
+    if state.fps_adjust_coeff and state.fps_adjust_coeff > 1.0001 then
+        fps_mult = 1 / state.fps_adjust_coeff
+    end
+
+    return string.format("%s%s [%s%s Mbps @ %s]", profile, osd_hdr_text, prefix, x_text, video_bitrate_source)
 end
 
 -- ======================================
@@ -437,20 +521,22 @@ local function get_video_codec_and_depth()
     return codec, depth or 8
 end
 
--- Resolution category classification
+-- Resolution category classification by frame area (Pixels)
 local function classify_resolution(width, height)
     width = width or 0
     height = height or 0
 
-    if width > 1920 or height > 1080 then
+    local pixels = width * height
+
+    if pixels > 2500000 then
         return "2160p"
     end
 
-    if width == 1920 or height == 1080 then
+    if pixels > 1300000 then
         return "1080p"
     end
 
-    if width >= 960 or height >= 540 then
+    if pixels > 640000 then
         return "720p"
     end
 
@@ -544,12 +630,78 @@ local function get_cartoon_multiplier_by_resolution(width, height)
     return CARTOON_MULTIPLIER[category] or 1.8
 end
 
+function build_profile_osd_string_refined(profile)
+    local avg_bitrate = state.avg_video_bitrate
+    local video_bitrate_source = state.video_bitrate_source or "n/a"
+    local prefix = (video_bitrate_source == "calc") and "~" or ""
+    local avg_text = avg_bitrate and fmt_bitrate(avg_bitrate) or "n/a"
+    local osd_hdr_text = " " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")
+
+    if profile == "hdtv" then
+        local bitrate_display = avg_text
+        local filename = (state.video_path or ""):lower()
+        local is_hdtv = filename:find("hdtv")
+
+        if state.is_cartoon and (state.cartoon_multiplier or 1.0) > 1.0 then
+            local orig_text = fmt_bitrate(avg_bitrate / state.cartoon_multiplier)
+            local applied_text = fmt_bitrate(avg_bitrate)
+            bitrate_display = string.format("%s (%s*c)", orig_text, applied_text)
+        elseif state.fps_adjust_coeff and state.fps_adjust_coeff > 1.0 and not state.is_cartoon and not is_hdtv then
+            local orig_text = fmt_bitrate(state.orig_video_bitrate)
+            bitrate_display = string.format("%s (%s*f)", orig_text, avg_text)
+        end
+        return
+            string.format("%s [%s%s Mbps @ %s]", string.upper(profile), prefix, bitrate_display, video_bitrate_source)
+    end
+
+    local x = state.raw_video_bitrate or 0
+    local x_text = fmt_bitrate(x)
+    local dw, dh = mp.get_property_number("width", 0), mp.get_property_number("height", 0)
+    local codec, bit_depth = get_video_codec_and_depth()
+    local depth_mult = BIT_DEPTH_MULTIPLIER[bit_depth] or 1.00
+    local codec_div = get_codec_equiv_factor(codec, dw, dh) or 1.0
+    local equiv = avg_bitrate / codec_div
+    local hdr_div = state.hdr_active and get_hdr_normalization_factor(equiv) or 1.0
+    local cartoon_mult = state.cartoon_multiplier or 1.0
+    local fps_mult = 1.0
+    if state.fps_adjust_coeff and state.fps_adjust_coeff > 1.0001 then
+        fps_mult = 1 / state.fps_adjust_coeff
+    end
+    local y = x * cartoon_mult * fps_mult * depth_mult / codec_div / hdr_div
+    local y_text = fmt_bitrate(y)
+
+    local coeff_parts = {}
+    if cartoon_mult ~= 1.0 then
+        table.insert(coeff_parts, string.format("cartoon x%.2f", cartoon_mult))
+    end
+    if codec_div ~= 1.0 then
+        table.insert(coeff_parts, string.format("codec /%.2f", codec_div))
+    end
+    if depth_mult ~= 1.0 then
+        table.insert(coeff_parts, string.format("bit depth x%.2f", depth_mult))
+    end
+    if fps_mult ~= 1.0 then
+        table.insert(coeff_parts, string.format("frame rate x%.2f", fps_mult))
+    end
+    if hdr_div ~= 1.0 then
+        table.insert(coeff_parts, string.format("hdr /%.2f", hdr_div))
+    end
+
+    if #coeff_parts > 0 then
+        local coeff_str = table.concat(coeff_parts, ", ")
+        return string.format("%s%s [%s%s Mbps @ %s] → [%s%s Mbps @ %s]", profile, osd_hdr_text, prefix, x_text,
+            video_bitrate_source, prefix, y_text, coeff_str)
+    else
+        return string.format("%s%s [%s%s Mbps @ %s]", profile, osd_hdr_text, prefix, x_text, video_bitrate_source)
+    end
+end
+
 -- ======================================
 -- FILE TYPE DETECTION
 -- ======================================
 
 local function get_special_file_type(path)
-    if path:match("^https?://") then
+    if path:match("^https?://.*youtube%.com") or path:match("^https?://youtu%.be") then
         return "youtube"
     end
 
@@ -777,64 +929,7 @@ local function apply_video_quality_profile()
     state.profile_applied = true
 
     if profile ~= "" and profile ~= "Default" then
-        local avg_bitrate = state.avg_video_bitrate
-        local video_bitrate_source = state.video_bitrate_source or "n/a"
-        local prefix = (video_bitrate_source == "calc") and "~" or ""
-        local avg_text = avg_bitrate and fmt_bitrate(avg_bitrate) or "n/a"
-        local bitrate_display = avg_text
-        local osd_hdr_text = " " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")
-
-        if state.is_cartoon and (state.cartoon_multiplier or 1.0) > 1.0 then
-            local orig_text = fmt_bitrate(avg_bitrate / state.cartoon_multiplier)
-            local applied_text = fmt_bitrate(avg_bitrate)
-            bitrate_display = string.format("%s (%s*c)", orig_text, applied_text)
-        elseif state.fps_adjust_coeff and state.fps_adjust_coeff > 1.0 then
-            local orig_text = fmt_bitrate(state.orig_video_bitrate)
-            bitrate_display = string.format("%s (%s*f)", orig_text, avg_text)
-        end
-
-        local x = state.raw_video_bitrate or 0
-        local x_text = fmt_bitrate(x)
-        local dw, dh = mp.get_property_number("width", 0), mp.get_property_number("height", 0)
-        local codec, bit_depth = get_video_codec_and_depth()
-        local depth_mult = BIT_DEPTH_MULTIPLIER[bit_depth] or 1.00
-        local codec_div = get_codec_equiv_factor(codec, dw, dh) or 1.0
-        local equiv = avg_bitrate / codec_div
-        local hdr_div = state.hdr_active and get_hdr_normalization_factor(equiv) or 1.0
-        local cartoon_mult = state.cartoon_multiplier or 1.0
-        local fps_mult = 1.0
-        if state.fps_adjust_coeff and state.fps_adjust_coeff > 1.0001 then
-            fps_mult = 1 / state.fps_adjust_coeff
-        end
-        local y = x * cartoon_mult * fps_mult * depth_mult / codec_div / hdr_div
-        local y_text = fmt_bitrate(y)
-        local coeff_parts = {}
-        if cartoon_mult ~= 1.0 then
-            table.insert(coeff_parts, string.format("cartoon x%.2f", cartoon_mult))
-        end
-        if codec_div ~= 1.0 then
-            table.insert(coeff_parts, string.format("codec /%.2f", codec_div))
-        end
-        if depth_mult ~= 1.0 then
-            table.insert(coeff_parts, string.format("bit depth x%.2f", depth_mult))
-        end
-        if fps_mult ~= 1.0 then
-            table.insert(coeff_parts, string.format("frame rate x%.2f", fps_mult))
-        end
-        if hdr_div ~= 1.0 then
-            table.insert(coeff_parts, string.format("hdr /%.2f", hdr_div))
-        end
-
-        local full_profile_str
-        if #coeff_parts > 0 then
-            local coeff_str = table.concat(coeff_parts, ", ")
-            full_profile_str = string.format("%s%s [%s%s Mbps @ %s] → [%s%s Mbps @ %s]", profile, osd_hdr_text,
-                prefix, x_text, video_bitrate_source, prefix, y_text, coeff_str)
-        else
-            full_profile_str = string.format("%s%s [%s%s Mbps @ %s]", profile, osd_hdr_text, prefix, x_text,
-                video_bitrate_source)
-        end
-
+        local full_profile_str = build_profile_osd_string_refined(profile)
         mp.msg.info("Applying quality profile: " .. full_profile_str)
         mp.commandv("apply-profile", profile)
     else
@@ -1027,13 +1122,7 @@ local function generate_static_osd_info()
     local v_codec = (mp.get_property("video-codec") or "unknown"):upper()
     local dw, dh = mp.get_property_number("width", 0), mp.get_property_number("height", 0)
     local avg_bitrate = state.avg_video_bitrate
-    local video_bitrate_source = state.video_bitrate_source or "n/a"
-    local filename = (state.video_path or ""):lower()
-    local is_hdtv = filename:find("hdtv")
     local profile = state.display_profile or "Loading..."
-    local prefix = (video_bitrate_source == "calc") and "~" or ""
-    local avg_text = avg_bitrate and fmt_bitrate(avg_bitrate) or "n/a"
-    local bitrate_display = avg_text
 
     state.video_name = get_video_name()
     state.osd_hdr_text = " " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")
@@ -1054,64 +1143,10 @@ local function generate_static_osd_info()
         state.osd_fps_display = ""
     end
 
-    if state.is_cartoon and (state.cartoon_multiplier or 1.0) > 1.0 then
-        local orig_text = fmt_bitrate(avg_bitrate / state.cartoon_multiplier)
-        local applied_text = fmt_bitrate(avg_bitrate)
-        bitrate_display = string.format("%s (%s*c)", orig_text, applied_text)
-    elseif state.fps_adjust_coeff and state.fps_adjust_coeff > 1.0 and not state.is_cartoon and not is_hdtv then
-        local orig_text = fmt_bitrate(state.orig_video_bitrate)
-        bitrate_display = string.format("%s (%s*f)", orig_text, avg_text)
-    end
-
     if profile:find("^DVD") or profile:find("YouTube") then
         state.osd_profile_line = "Profile: " .. profile
     elseif avg_bitrate then
-        if profile == "hdtv" then
-            state.osd_profile_line = string.format("Profile: %s [%s%s Mbps @ %s]", string.upper(profile), prefix,
-                bitrate_display, video_bitrate_source)
-        else
-            local prefix = (state.video_bitrate_source == "calc") and "~" or ""
-            local x = state.raw_video_bitrate or 0
-            local x_text = fmt_bitrate(x)
-            local source = state.video_bitrate_source
-            local codec, bit_depth = get_video_codec_and_depth()
-            local depth_mult = BIT_DEPTH_MULTIPLIER[bit_depth] or 1.00
-            local codec_div = get_codec_equiv_factor(codec, dw, dh) or 1.0
-            local equiv = avg_bitrate / codec_div
-            local hdr_div = state.hdr_active and get_hdr_normalization_factor(equiv) or 1.0
-            local cartoon_mult = state.cartoon_multiplier or 1.0
-            local fps_mult = 1.0
-            if state.fps_adjust_coeff and state.fps_adjust_coeff > 1.0001 then
-                fps_mult = 1 / state.fps_adjust_coeff
-            end
-            local y = x * cartoon_mult * fps_mult * depth_mult / codec_div / hdr_div
-            local y_text = fmt_bitrate(y)
-            local coeff_parts = {}
-            if cartoon_mult ~= 1.0 then
-                table.insert(coeff_parts, string.format("cartoon x%.2f", cartoon_mult))
-            end
-            if codec_div ~= 1.0 then
-                table.insert(coeff_parts, string.format("codec /%.2f", codec_div))
-            end
-            if depth_mult ~= 1.0 then
-                table.insert(coeff_parts, string.format("bit depth x%.2f", depth_mult))
-            end
-            if fps_mult ~= 1.0 then
-                table.insert(coeff_parts, string.format("frame rate x%.2f", fps_mult))
-            end
-            if hdr_div ~= 1.0 then
-                table.insert(coeff_parts, string.format("hdr /%.2f", hdr_div))
-            end
-
-            if #coeff_parts > 0 then
-                local coeff_str = table.concat(coeff_parts, ", ")
-                state.osd_profile_line = string.format("Profile: %s%s [%s%s Mbps @ %s] → [%s%s Mbps @ %s]", profile,
-                    state.osd_hdr_text, prefix, x_text, source, prefix, y_text, coeff_str)
-            else
-                state.osd_profile_line = string.format("Profile: %s%s [%s%s Mbps @ %s]", profile, state.osd_hdr_text,
-                    prefix, x_text, source)
-            end
-        end
+        state.osd_profile_line = "Profile: " .. build_profile_osd_string_refined(profile)
     else
         state.osd_profile_line = string.format("Profile: %s%s [n/a]", profile, state.osd_hdr_text)
     end
@@ -1153,7 +1188,7 @@ local function generate_static_osd_info()
             if c then
                 disp = string.format("Contrast Adaptive Sharpening [%s]", c)
             end
-            table.insert(shader_lines, string.format("　%d. %s", i, disp))
+            table.insert(shader_lines, string.format(" %d. %s", i, disp))
         end
         state.osd_shader_line = "Shaders:\\N" .. table.concat(shader_lines, "\\N")
     else
