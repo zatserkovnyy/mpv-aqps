@@ -2,7 +2,7 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.2.0
+-- Version: 1.2.1
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
@@ -664,7 +664,6 @@ local function estimate_input_video_bitrate(path)
     state.is_cartoon = is_cartoon_content(filename)
 
     if state.is_cartoon then
-        local height = mp.get_property_number("height") or 0
         local width = mp.get_property_number("width") or 0
         state.cartoon_multiplier = get_cartoon_multiplier_by_resolution(width, height)
     end
@@ -743,20 +742,7 @@ local function build_profile_osd_string(profile)
     local osd_hdr_text = " " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")
 
     if profile == "hdtv" then
-        local bitrate_display = avg_text
-        local filename = (state.video_path or ""):lower()
-        local is_hdtv = filename:find("hdtv")
-
-        if state.is_cartoon and (state.cartoon_multiplier or 1.0) > 1.0 then
-            local orig_text = fmt_bitrate(avg_bitrate / state.cartoon_multiplier)
-            local applied_text = fmt_bitrate(avg_bitrate)
-            bitrate_display = string.format("%s (%s*c)", orig_text, applied_text)
-        elseif state.fps_adjust_coeff and state.fps_adjust_coeff > 1.0 and not state.is_cartoon and not is_hdtv then
-            local orig_text = fmt_bitrate(state.orig_video_bitrate)
-            bitrate_display = string.format("%s (%s*f)", orig_text, avg_text)
-        end
-        return
-            string.format("%s [%s%s Mbps @ %s]", string.upper(profile), prefix, bitrate_display, video_bitrate_source)
+        return string.format("%s [%s%s Mbps @ %s]", string.upper(profile), prefix, avg_text, video_bitrate_source)
     end
 
     local x = state.raw_video_bitrate or 0
