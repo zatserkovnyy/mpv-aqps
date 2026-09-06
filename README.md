@@ -218,7 +218,9 @@ futurama
 simpsons
 morty
 phineas
-south
+south.park
+gravity.falls
+spongebob
 ```
 
 If one of these strings is found in the filename, the video is classified as cartoon content.
@@ -1752,8 +1754,9 @@ You must define these profiles yourself in `mpv.conf` with the settings you pref
 
 ## Requirements
 
-- **ffprobe** must be available.  
-  Place `ffprobe.exe` (Windows) or `ffprobe` (Linux/macOS) in the same folder as `mpv` **or** make sure it is in your system `PATH`.
+- **ffprobe** must be installed on your system.
+  - **Windows:** Place `ffprobe.exe` in the same folder as `mpv.exe` **or** add it to your system `PATH`.
+  - **macOS / Linux:** Install via your package manager (e.g., `brew install ffmpeg` or `sudo apt install ffmpeg`). The script automatically detects `ffprobe` in standard locations (such as `/opt/homebrew/bin`, `/usr/local/bin`, or `/usr/bin`) even if your system `PATH` is not fully passed to the mpv GUI application.
 - Profiles listed above must exist in your `mpv.conf` (you define the actual settings inside them).
 
 ## Installation
@@ -1808,11 +1811,11 @@ Because the script only *selects* profiles, you have full control over the actua
 
 ## Sample OSD
 
-<img width="2836" height="941" alt="osd-1" src="https://github.com/user-attachments/assets/3fb7465c-77e1-4948-bcb9-d33ea482cafe" />
+<img width="2676" height="966" alt="osd-1" src="https://github.com/user-attachments/assets/429d2575-9f4c-4f7b-be31-9e72d328a4fa" />
 
 ---
 
-<img width="2836" height="904" alt="osd-2" src="https://github.com/user-attachments/assets/df3012dd-a523-43e6-82b7-b0be7cdf2eac" />
+<img width="2676" height="966" alt="osd-2" src="https://github.com/user-attachments/assets/3711b279-9538-406c-9d97-af9f89ffbabe" />
 
 ## Sample mpv.conf (e.g., for my 1080p PJ)
 
@@ -1992,7 +1995,7 @@ deband-grain=4
 
 ## Notes
 
-Please note: the script/build was made for Windows. I could support macOS in the future, but I currently lack a Mac device to test it. 
+Please note: this script is designed to be fully cross-platform (Windows, macOS, Linux). However, since I primarily develop on Windows and currently cannot test directly on macOS or Linux environments, please feel free to open an issue or provide feedback if you encounter any platform-specific bugs!
 
 - All threshold values, bitrates, multipliers, and factors (such as codec efficiencies, HDR bonuses, and custom cartoon detection titles) are defined right at the top of the script under the `CONSTANTS` section. You can easily tweak any number in the code to perfectly match your specific display, projector, or hardware capabilities.
 - The script is heavily optimized for **1080p projectors**, but the 2160p profiles and logic are fully functional for 4K displays.
