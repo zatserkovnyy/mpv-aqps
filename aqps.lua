@@ -1278,7 +1278,7 @@ local function reset_state()
     ffprobe_cache = {}
 
     mp.set_property("deband", "no")
-    mp.set_property("glsl-shaders", "")
+    mp.set_property_native("glsl-shaders", {})
     mp.set_osd_ass(0, 0, "")
 end
 
