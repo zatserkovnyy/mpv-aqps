@@ -2,7 +2,7 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.1.1
+-- Version: 1.2.0
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
@@ -84,7 +84,7 @@ local CARTOON_MULTIPLIER = {
     ["2160p"] = 1.90
 }
 
-local CARTOON_SHOWS = {"futurama", "simpsons", "morty", "phineas", "south"}
+local CARTOON_SHOWS = {"futurama", "simpsons", "morty", "phineas", "south.park", "gravity.falls", "spongebob"}
 
 local DEFAULT_AUDIO_BITRATE = 0.192
 local ATMOS_BONUS = 0.512
@@ -110,7 +110,35 @@ local BASE_AUDIO_BITRATES = {
 -- FFPROBE DETECTION
 -- ======================================
 
-local ffprobe_path = "ffprobe"
+local function find_ffprobe()
+    local res = utils.subprocess({
+        args = {"ffprobe", "-version"},
+        cancellable = false
+    })
+    if res and not res.error_string then
+        return "ffprobe"
+    end
+
+    if package.config:sub(1, 1) == "\\" then
+        return "ffprobe"
+    end
+
+    local fallback_paths = {"/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe", "/usr/bin/ffprobe"}
+
+    for _, path in ipairs(fallback_paths) do
+        local r = utils.subprocess({
+            args = {path, "-version"},
+            cancellable = false
+        })
+        if r and not r.error_string then
+            return path
+        end
+    end
+
+    return "ffprobe"
+end
+
+local ffprobe_path = find_ffprobe()
 mp.msg.info("Using ffprobe: " .. ffprobe_path)
 
 -- ======================================
@@ -291,7 +319,7 @@ local function get_video_bitrate_and_fps(path)
         return nil, nil
     end
 
-    local res, err = utils.subprocess({
+    local res = utils.subprocess({
         args = {ffprobe_path, "-v", "error", "-select_streams", "v:0", "-show_entries",
                 "stream=bit_rate,r_frame_rate:stream_tags=BPS", "-of", "json", path},
         cancellable = false
@@ -1250,7 +1278,7 @@ local function reset_state()
     ffprobe_cache = {}
 
     mp.set_property("deband", "no")
-    mp.set_property_native("glsl-shaders", {})
+    mp.set_property("glsl-shaders", "")
     mp.set_osd_ass(0, 0, "")
 end
 
