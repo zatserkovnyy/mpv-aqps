@@ -2,7 +2,7 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.2.1
+-- Version: 1.2.2
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
@@ -106,43 +106,12 @@ local BASE_AUDIO_BITRATES = {
     opus = 0.128
 }
 
--- ======================================
--- FFPROBE DETECTION
--- ======================================
-
-local function find_ffprobe()
-    local res = utils.subprocess({
-        args = {"ffprobe", "-version"},
-        cancellable = false
-    })
-    if res and not res.error_string then
-        return "ffprobe"
-    end
-
-    if package.config:sub(1, 1) == "\\" then
-        return "ffprobe"
-    end
-
-    local fallback_paths = {"/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe", "/usr/bin/ffprobe"}
-
-    for _, path in ipairs(fallback_paths) do
-        local r = utils.subprocess({
-            args = {path, "-version"},
-            cancellable = false
-        })
-        if r and not r.error_string then
-            return path
-        end
-    end
-
-    return "ffprobe"
-end
-
-local ffprobe_path = find_ffprobe()
-mp.msg.info("Using ffprobe: " .. ffprobe_path)
+local FFPROBE_CACHE_SEC = 60
+local OSD_REFRESH_SEC = 1
+local TRACK_UPDATE_DELAY_SEC = 0.1
 
 -- ======================================
--- STATE TABLE
+-- GLOBAL STATE
 -- ======================================
 
 local default_state = {
@@ -184,7 +153,7 @@ for k, v in pairs(default_state) do
 end
 
 -- ======================================
--- CACHE
+-- CACHES
 -- ======================================
 
 local ffprobe_cache = {}
@@ -192,9 +161,106 @@ local audio_bitrate_cache = {}
 local quality_profile_cache = {}
 
 -- ======================================
--- AUDIO BITRATE CALCULATION
+-- FFPROBE INITIALIZATION
 -- ======================================
 
+-- Find the ffprobe executable path
+local function find_ffprobe()
+    local res = utils.subprocess({
+        args = {"ffprobe", "-version"},
+        cancellable = false
+    })
+    if res and not res.error_string then
+        return "ffprobe"
+    end
+
+    if package.config:sub(1, 1) == "\\" then
+        return "ffprobe"
+    end
+
+    local fallback_paths = {"/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe", "/usr/bin/ffprobe"}
+
+    for _, path in ipairs(fallback_paths) do
+        local r = utils.subprocess({
+            args = {path, "-version"},
+            cancellable = false
+        })
+        if r and not r.error_string then
+            return path
+        end
+    end
+
+    return "ffprobe"
+end
+
+local ffprobe_path = find_ffprobe()
+mp.msg.info("Using ffprobe: " .. ffprobe_path)
+
+-- ======================================
+-- UTILITY FUNCTIONS
+-- ======================================
+
+-- Format bitrate to one decimal place
+local function fmt_bitrate(val)
+    return string.format("%.1f", math.floor((val or 0) * 10 + 0.5) / 10)
+end
+
+-- Extract video title or filename
+local function get_video_name()
+    local path = state.video_path or ""
+    local is_youtube = path:match("^https?://.*youtube%.com") or path:match("^https?://youtu%.be")
+
+    if is_youtube then
+        local title = mp.get_property("media-title")
+
+        if title and title ~= "" then
+            return title
+        end
+    end
+
+    return ((path or "Unknown"):match("[^/\\]+$") or "Unknown"):gsub("%.[^%.]+$", "")
+end
+
+-- ======================================
+-- CONTENT CLASSIFICATION
+-- ======================================
+
+-- Detect special sources like YouTube, DVD, or specific shows
+local function get_special_file_type(path)
+    if path:match("^https?://.*youtube%.com") or path:match("^https?://youtu%.be") then
+        return "youtube"
+    end
+
+    local filename = path:match("[^/\\]+$") or ""
+    local fname_lc = filename:lower()
+
+    if fname_lc:find("hdtv") then
+        return "hdtv"
+    elseif fname_lc:find("%.vob$") or fname_lc:find("%.ifo$") then
+        return "dvd"
+    end
+
+    return nil
+end
+
+-- Check if the file is a known cartoon based on filename
+local function is_cartoon_content(filename)
+    local lc_filename = filename:lower()
+
+    for _, show in ipairs(CARTOON_SHOWS) do
+        if lc_filename:find(show) then
+            return true
+        end
+    end
+
+    return false
+end
+
+-- ======================================
+-- AUDIO ANALYSIS
+-- ======================================
+
+-- Estimate audio bitrate based on codec and channels
 local function calculate_audio_bitrate(track)
     if not track then
         return DEFAULT_AUDIO_BITRATE
@@ -254,32 +320,7 @@ local function calculate_audio_bitrate(track)
     return total
 end
 
--- ======================================
--- HELPERS
--- ======================================
-
--- Bitrate formatting
-local function fmt_bitrate(val)
-    return string.format("%.1f", math.floor((val or 0) * 10 + 0.5) / 10)
-end
-
--- Video name
-local function get_video_name()
-    local path = state.video_path or ""
-    local is_youtube = path:match("^https?://.*youtube%.com") or path:match("^https?://youtu%.be")
-
-    if is_youtube then
-        local title = mp.get_property("media-title")
-
-        if title and title ~= "" then
-            return title
-        end
-    end
-
-    return ((path or "Unknown"):match("[^/\\]+$") or "Unknown"):gsub("%.[^%.]+$", "")
-end
-
--- Audio bitrate
+-- Retrieve or calculate audio bitrate using cache
 local function get_cached_audio_bitrate(track)
     if not track.id then
         return calculate_audio_bitrate(track)
@@ -298,13 +339,14 @@ local function get_cached_audio_bitrate(track)
 end
 
 -- ======================================
--- VIDEO INFO RETRIEVAL
+-- VIDEO ANALYSIS
 -- ======================================
 
+-- Fetch video bitrate and FPS using ffprobe
 local function get_video_bitrate_and_fps(path)
     local c = ffprobe_cache[path]
 
-    if c and os.time() - (c.last_checked or 0) < 60 then
+    if c and os.time() - (c.last_checked or 0) < FFPROBE_CACHE_SEC then
         return c.v_bitrate, c.v_fps
     end
 
@@ -363,6 +405,7 @@ end
 -- HDR DETECTION
 -- ======================================
 
+-- Detect HDR type and apply corresponding profile
 local function update_hdr_profile()
     if not state.hdr_enabled then
         state.hdr_type = ""
@@ -418,9 +461,10 @@ local function update_hdr_profile()
 end
 
 -- ======================================
--- VIDEO QUALITY NORMALIZATION
+-- VIDEO METRICS NORMALIZATION
 -- ======================================
 
+-- Get the currently selected video track
 local function get_video_track()
     local tracks = mp.get_property_native("track-list") or {}
 
@@ -433,6 +477,7 @@ local function get_video_track()
     return nil
 end
 
+-- Retrieve video codec and bit depth
 local function get_video_codec_and_depth()
     local codec = (mp.get_property("video-codec") or ""):lower()
     local vp = mp.get_property_native("video-params") or {}
@@ -467,7 +512,7 @@ local function get_video_codec_and_depth()
     return codec, depth or 8
 end
 
--- Resolution category classification by frame area (Pixels)
+-- Classify resolution category based on frame area (pixels)
 local function classify_resolution(width, height)
     width = width or 0
     height = height or 0
@@ -489,7 +534,7 @@ local function classify_resolution(width, height)
     return "480p"
 end
 
--- Codec efficiency factor
+-- Get codec efficiency multiplier
 local function get_codec_equiv_factor(codec, width, height)
     codec = (codec or ""):lower()
     local category = classify_resolution(width, height)
@@ -510,7 +555,7 @@ local function get_codec_equiv_factor(codec, width, height)
     return 1.0
 end
 
--- HDR multiplier
+-- Get HDR bitrate penalty factor
 local function get_hdr_normalization_factor(equiv_bitrate)
     if not state.hdr_active then
         return 1.0
@@ -549,7 +594,7 @@ local function get_hdr_normalization_factor(equiv_bitrate)
     end
 end
 
--- Bits multiplier
+-- Normalize bitrate considering codec, bit depth, and HDR
 local function get_normalized_video_bitrate(avg_bitrate, width, height)
     if not avg_bitrate then
         return nil
@@ -570,49 +615,17 @@ local function get_normalized_video_bitrate(avg_bitrate, width, height)
     return adjusted_bitrate
 end
 
--- Cartoon multiplier
+-- Get cartoon bitrate multiplier
 local function get_cartoon_multiplier_by_resolution(width, height)
     local category = classify_resolution(width, height)
     return CARTOON_MULTIPLIER[category] or 1.8
 end
 
 -- ======================================
--- FILE TYPE DETECTION
+-- PROFILE ESTIMATION
 -- ======================================
 
-local function get_special_file_type(path)
-    if path:match("^https?://.*youtube%.com") or path:match("^https?://youtu%.be") then
-        return "youtube"
-    end
-
-    local filename = path:match("[^/\\]+$") or ""
-    local fname_lc = filename:lower()
-
-    if fname_lc:find("hdtv") then
-        return "hdtv"
-    elseif fname_lc:find("%.vob$") or fname_lc:find("%.ifo$") then
-        return "dvd"
-    end
-
-    return nil
-end
-
-local function is_cartoon_content(filename)
-    local lc_filename = filename:lower()
-
-    for _, show in ipairs(CARTOON_SHOWS) do
-        if lc_filename:find(show) then
-            return true
-        end
-    end
-
-    return false
-end
-
--- ======================================
--- BITRATE AND PROFILE SELECTION
--- ======================================
-
+-- Estimate base video bitrate handling audio subtraction and cartoons
 local function estimate_input_video_bitrate(path)
     local ftype = get_special_file_type(state.video_path or "")
     local duration = mp.get_property_number("duration") or 0
@@ -629,15 +642,6 @@ local function estimate_input_video_bitrate(path)
     local v_bitrate, v_fps = get_video_bitrate_and_fps(path)
     local source
 
-    -- 50 FPS fix
-    local height = mp.get_property_number("height", 0)
-
-    if v_fps and math.abs(v_fps - 50) < 0.01 and (height == 576 or height == 1080) then
-        mp.msg.info("50 fps resolution detected, treating as 25 FPS for coeff")
-        state.video_fps_actual = v_fps
-        v_fps = 25
-    end
-
     if ftype == "dvd" then
         v_bitrate, v_fps, source = nil, nil, "n/a"
     else
@@ -646,7 +650,6 @@ local function estimate_input_video_bitrate(path)
                 local total = size * 8 / duration / 1e6
                 v_bitrate = math.max(math.min(math.max(total - audio_sum, total * 0.8, 0), 1000), 0.1)
             end
-
             source = "calc"
         else
             source = "ffprobe"
@@ -659,12 +662,12 @@ local function estimate_input_video_bitrate(path)
         state.raw_video_bitrate = nil
     end
 
-    -- Cartoons
     local filename = state.video_path or ""
     state.is_cartoon = is_cartoon_content(filename)
 
     if state.is_cartoon then
         local width = mp.get_property_number("width") or 0
+        local height = mp.get_property_number("height") or 0
         state.cartoon_multiplier = get_cartoon_multiplier_by_resolution(width, height)
     end
 
@@ -672,7 +675,6 @@ local function estimate_input_video_bitrate(path)
         v_bitrate = v_bitrate * state.cartoon_multiplier
     end
 
-    -- FPS correction
     if state.cartoon_multiplier == 1.0 and v_fps and v_bitrate and not ftype then
         local fps_diff = math.abs(v_fps - 23.976) > 0.01 and math.abs(v_fps - 24.0) > 0.01
 
@@ -694,7 +696,7 @@ local function estimate_input_video_bitrate(path)
     return v_bitrate, v_fps or 0, source, state.cartoon_multiplier
 end
 
--- Profile selection
+-- Determine the appropriate playback profile
 local function determine_quality_profile(avg_bitrate, height)
     if not avg_bitrate then
         return "Default"
@@ -731,9 +733,10 @@ local function determine_quality_profile(avg_bitrate, height)
 end
 
 -- ======================================
--- SMART PROFILE APPLICATION
+-- PROFILE APPLICATION
 -- ======================================
 
+-- Generate the profile details string for OSD
 local function build_profile_osd_string(profile)
     local avg_bitrate = state.avg_video_bitrate
     local video_bitrate_source = state.video_bitrate_source or "n/a"
@@ -741,8 +744,8 @@ local function build_profile_osd_string(profile)
     local avg_text = avg_bitrate and fmt_bitrate(avg_bitrate) or "n/a"
     local osd_hdr_text = " " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")
 
-    if profile == "hdtv" then
-        return string.format("%s [%s%s Mbps @ %s]", string.upper(profile), prefix, avg_text, video_bitrate_source)
+    if profile == "HDTV" then
+        return string.format("%s [%s%s Mbps @ %s]", profile, prefix, avg_text, video_bitrate_source)
     end
 
     local x = state.raw_video_bitrate or 0
@@ -787,6 +790,7 @@ local function build_profile_osd_string(profile)
     end
 end
 
+-- Evaluate and apply the correct video profile
 local function apply_video_quality_profile()
     if state.profile_applied then
         return
@@ -816,7 +820,6 @@ local function apply_video_quality_profile()
     end
 
     if ftype == "youtube" then
-        local width = mp.get_property_number("width") or 0
         local height = mp.get_property_number("height") or 0
         local youtube_profile
 
@@ -831,8 +834,7 @@ local function apply_video_quality_profile()
         apply_special(youtube_profile, youtube_profile)
         return
     elseif ftype == "dvd" then
-        apply_special("DVD", "dvd", function()
-        end)
+        apply_special("DVD", "dvd")
         return
     elseif ftype == "hdtv" then
         local avg, fps, source, coeff = estimate_input_video_bitrate(path)
@@ -841,7 +843,7 @@ local function apply_video_quality_profile()
         state.video_bitrate_source = source
         state.video_fps_actual = fps
         state.cartoon_multiplier = coeff
-        apply_special("hdtv", "hdtv")
+        apply_special("HDTV", "hdtv")
         return
     end
 
@@ -870,9 +872,10 @@ local function apply_video_quality_profile()
 end
 
 -- ======================================
--- OSD FORMATTING HELPERS
+-- OSD UTILITIES
 -- ======================================
 
+-- Format seconds into HH:MM:SS or MM:SS
 local function format_time_hms(seconds, show_hours, show_seconds)
     if not seconds or seconds < 0 then
         return "00:00"
@@ -889,6 +892,7 @@ local function format_time_hms(seconds, show_hours, show_seconds)
     end
 end
 
+-- Calculate ETA time based on remaining seconds
 local function format_eta_time(seconds_remaining)
     if not seconds_remaining or seconds_remaining < 0 then
         return "00:00"
@@ -898,7 +902,7 @@ local function format_eta_time(seconds_remaining)
     return string.format("%02d:%02d", t.hour, t.min)
 end
 
--- Get friendly codec name for audio track
+-- Get user-friendly audio codec name
 local function get_readable_audio_codec_name(track)
     if not track or not track.codec then
         return "Unknown"
@@ -952,7 +956,7 @@ local function get_readable_audio_codec_name(track)
     return res:gsub("%+", " Plus")
 end
 
--- Get subtitle type description
+-- Get user-friendly subtitle format name
 local function get_readable_subtitle_type(track)
     if not track or not track.codec then
         return "Unknown"
@@ -971,7 +975,7 @@ local function get_readable_subtitle_type(track)
     end
 end
 
--- Get selected audio and subtitle tracks with indices
+-- Extract currently selected audio and subtitle tracks
 local function get_selected_tracks(tracks)
     local sel_audio, sel_sub
     local sel_audio_idx, sel_sub_idx = 0, 0
@@ -994,6 +998,7 @@ local function get_selected_tracks(tracks)
     return sel_audio, sel_audio_idx, sel_sub, sel_sub_idx, audio_cnt, sub_cnt
 end
 
+-- Determine effective video frame rate
 local function determine_video_fps()
     local fps = state.video_fps_actual
 
@@ -1022,7 +1027,7 @@ local function determine_video_fps()
     return fps
 end
 
--- Tone-Mapping
+-- Retrieve the active tone-mapping algorithm
 local function get_active_tonemapping_name()
     local tm = mp.get_property("tone-mapping")
     if not state.hdr_active or not tm or tm == "" or tm == "auto" then
@@ -1036,7 +1041,7 @@ local function get_active_tonemapping_name()
     return tm:sub(1, 1):upper() .. tm:sub(2)
 end
 
--- 3dlut
+-- Retrieve the active 3D LUT name
 local function get_active_lut_name()
     local lut = mp.get_property("target-lut")
     if lut and lut ~= "" and lut ~= "no" then
@@ -1046,9 +1051,10 @@ local function get_active_lut_name()
 end
 
 -- ======================================
--- OSD STATIC
+-- OSD STATIC CONTENT
 -- ======================================
 
+-- Pre-generate static OSD elements (video, profile, shaders)
 local function generate_static_osd_info()
     local v_in = mp.get_property_native("video-params") or {}
     local v_codec = (mp.get_property("video-codec") or "unknown"):upper()
@@ -1142,9 +1148,10 @@ local function generate_static_osd_info()
 end
 
 -- ======================================
--- OSD DYNAMIC
+-- OSD DYNAMIC CONTENT
 -- ======================================
 
+-- Pre-generate dynamic OSD elements (audio, subs)
 local function generate_dynamic_osd_info()
     local tracks = mp.get_property_native("track-list") or {}
     local sel_audio, sel_audio_idx, sel_sub, sel_sub_idx, audio_cnt, sub_cnt = get_selected_tracks(tracks)
@@ -1171,9 +1178,10 @@ local function generate_dynamic_osd_info()
 end
 
 -- ======================================
--- OSD DISPLAY
+-- OSD RENDERING
 -- ======================================
 
+-- Render the OSD to the screen
 local function display_osd()
     if not state.osd_visible then
         mp.set_osd_ass(0, 0, "")
@@ -1225,18 +1233,20 @@ local function display_osd()
 end
 
 -- ======================================
--- OSD TOGGLE FUNCTIONS
+-- OSD CONTROLS
 -- ======================================
 
+-- Enable and show the periodic OSD
 local function show_osd()
     state.osd_visible = true
     if state.osd_timer then
         state.osd_timer:kill()
     end
-    state.osd_timer = mp.add_periodic_timer(1, display_osd)
+    state.osd_timer = mp.add_periodic_timer(OSD_REFRESH_SEC, display_osd)
     display_osd()
 end
 
+-- Disable and hide the OSD
 local function hide_osd()
     state.osd_visible = false
     if state.osd_timer then
@@ -1247,9 +1257,10 @@ local function hide_osd()
 end
 
 -- ======================================
--- RESET AND REFRESH FUNCTIONS
+-- STATE MANAGEMENT
 -- ======================================
 
+-- Reset global state and clear caches on file load
 local function reset_state()
     if state.osd_timer then
         state.osd_timer:kill()
@@ -1392,7 +1403,7 @@ mp.register_event("tracks-changed", function()
         track_update_timer:kill()
     end
 
-    track_update_timer = mp.add_timeout(0.1, function()
+    track_update_timer = mp.add_timeout(TRACK_UPDATE_DELAY_SEC, function()
         generate_dynamic_osd_info()
         if state.osd_visible then
             display_osd()
