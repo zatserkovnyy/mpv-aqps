@@ -12,7 +12,7 @@ On every file load the script:
    - Codec efficiency (H.264, HEVC, AV1, VP9…)
    - Bit depth (8/10/12/16-bit)
    - HDR (HDR10, HDR10+, Dolby Vision, HLG…)
-   - Frame rate (corrects high-FPS content)
+   - Frame rate (corrects high-FPS content to a 24fps equivalent base)
    - Cartoon content (applies higher multiplier)
 4. Selects and applies one of the quality profiles listed below.
 5. Detects special sources (YouTube, DVD, custom `hdtv` files) and applies dedicated profiles.
@@ -491,28 +491,7 @@ This prevents high-frame-rate video from receiving an artificially high quality 
 
 ---
 
-# 14. 50 FPS Special Case
-
-The script contains a specific correction for:
-
-- 576p @ 50 FPS
-- 1080p @ 50 FPS
-
-These sources are treated as effectively 25 FPS for the bitrate coefficient calculation.
-
-Conceptually:
-
-```text
-50 FPS → 25 FPS
-```
-
-The original FPS is still retained separately for display.
-
-This allows the OSD to show the actual source frame rate while the normalization algorithm uses the adjusted value.
-
----
-
-# 15. Complete Normalized Bitrate Formula
+# 14. Complete Normalized Bitrate Formula
 
 The core normalization process can be represented as:
 
@@ -545,7 +524,7 @@ normalized_bitrate =
 
 ---
 
-# 16. Quality Profile Selection
+# 15. Quality Profile Selection
 
 After normalization, the script compares the resulting bitrate against the resolution-specific thresholds.
 
@@ -583,7 +562,7 @@ The selected profile is cached using the file path and resolution.
 
 ---
 
-# 17. HDR Detection
+# 16. HDR Detection
 
 HDR detection is based on mpv's:
 
@@ -646,7 +625,7 @@ HDR changes are handled dynamically through mpv property observers.
 
 ---
 
-# 18. Runtime State
+# 17. Runtime State
 
 The script keeps its runtime information inside a central `state` table.
 
@@ -671,7 +650,7 @@ This provides a central representation of the current video state.
 
 ---
 
-# 19. Caching
+# 18. Caching
 
 The script uses several caches:
 
@@ -707,7 +686,7 @@ Caching prevents repeated calculations during playback.
 
 ---
 
-# 20. Audio OSD
+# 19. Audio OSD
 
 The OSD displays information about the currently selected audio track:
 
@@ -738,7 +717,7 @@ The exact information depends on the metadata provided by mpv.
 
 ---
 
-# 21. Audio Codec Identification
+# 20. Audio Codec Identification
 
 The script performs additional codec identification instead of simply displaying the raw codec name.
 
@@ -778,7 +757,7 @@ If `Atmos` is detected in the track title, it is added to the displayed codec na
 
 ---
 
-# 22. Subtitle Information
+# 21. Subtitle Information
 
 The selected subtitle track is also displayed.
 
@@ -819,7 +798,7 @@ The OSD also displays:
 
 ---
 
-# 23. Tone Mapping
+# 22. Tone Mapping
 
 The script checks mpv's:
 
@@ -853,7 +832,7 @@ while other algorithm names are formatted for readability.
 
 ---
 
-# 24. 3D LUT Detection
+# 23. 3D LUT Detection
 
 The script checks mpv's:
 
@@ -885,7 +864,7 @@ If no LUT is active:
 
 ---
 
-# 25. Debanding Detection
+# 24. Debanding Detection
 
 The script checks whether mpv debanding is enabled.
 
@@ -906,7 +885,7 @@ This provides direct visibility into the current debanding configuration.
 
 ---
 
-# 26. Shader Detection
+# 25. Shader Detection
 
 The script reads mpv's:
 
@@ -932,7 +911,7 @@ Shaders: inactive
 
 ---
 
-# 27. Static OSD Information
+# 26. Static OSD Information
 
 Static OSD information contains parameters that normally do not change every frame.
 
@@ -962,7 +941,7 @@ The purpose is to make the profile-selection process transparent and debuggable.
 
 ---
 
-# 28. Normalization Breakdown in the OSD
+# 27. Normalization Breakdown in the OSD
 
 One of the most useful parts of the OSD is that it can show how the normalized bitrate was calculated.
 
@@ -1008,7 +987,7 @@ This makes it possible to understand why a particular profile was selected inste
 
 ---
 
-# 29. Dynamic OSD Information
+# 28. Dynamic OSD Information
 
 Dynamic OSD information is regenerated when track or audio properties change.
 
@@ -1024,7 +1003,7 @@ Static video information does not need to be rebuilt every time the user changes
 
 ---
 
-# 30. OSD Layout
+# 29. OSD Layout
 
 When visible, the OSD contains information in approximately this order:
 
@@ -1060,7 +1039,7 @@ The OSD is rendered using mpv's ASS OSD interface.
 
 ---
 
-# 31. OSD Refresh
+# 30. OSD Refresh
 
 The custom OSD is toggled using:
 
@@ -1082,7 +1061,7 @@ This means playback time and ETA are refreshed once per second.
 
 ---
 
-# 32. mpv Property Observers
+# 31. mpv Property Observers
 
 The script observes several mpv properties so that information updates automatically.
 
@@ -1120,7 +1099,7 @@ When a relevant property changes, the appropriate part of the OSD is regenerated
 
 ---
 
-# 33. Event-Driven HDR Handling
+# 32. Event-Driven HDR Handling
 
 HDR detection is integrated into mpv's property observer system.
 
@@ -1143,7 +1122,7 @@ This allows HDR changes to be handled dynamically during playback.
 
 ---
 
-# 34. File Lifecycle
+# 33. File Lifecycle
 
 The script primarily operates through two events:
 
@@ -1192,7 +1171,7 @@ This is effectively the main initialization stage for every new video.
 
 ---
 
-# 35. Track Changes
+# 34. Track Changes
 
 When the available tracks change, the audio bitrate cache is cleared.
 
@@ -1200,7 +1179,7 @@ This ensures that newly available or modified audio tracks do not accidentally r
 
 ---
 
-# 36. Keyboard Controls
+# 35. Keyboard Controls
 
 ## `HOMEPAGE`
 
@@ -1228,7 +1207,7 @@ This prevents the custom AQPS OSD and mpv's standard statistics overlay from bei
 
 ---
 
-# 37. Complete Processing Pipeline
+# 36. Complete Processing Pipeline
 
 The normal-video processing pipeline can be summarized as:
 
@@ -1298,7 +1277,7 @@ Detect special file type
 
 ---
 
-# 38. Example: 1080p HEVC HDR 10-bit
+# 37. Example: 1080p HEVC HDR 10-bit
 
 Consider a source with:
 
@@ -1360,7 +1339,7 @@ This example demonstrates why the script does not classify video solely by its r
 
 ---
 
-# 39. Example: 1080p H.264
+# 38. Example: 1080p H.264
 
 Consider:
 
@@ -1409,7 +1388,7 @@ the selected profile is:
 
 ---
 
-# 40. Example: 2160p AV1
+# 39. Example: 2160p AV1
 
 Consider:
 
@@ -1454,7 +1433,7 @@ This illustrates the purpose of codec normalization: a relatively low raw bitrat
 
 ---
 
-# 41. What the Script Is Actually Measuring
+# 40. What the Script Is Actually Measuring
 
 AQPS is not directly measuring visual quality.
 
@@ -1476,7 +1455,7 @@ The resulting value is used as the **effective / equivalent bitrate** for profil
 
 ---
 
-# 42. Profile Selection vs. Playback Configuration
+# 41. Profile Selection vs. Playback Configuration
 
 The script does not contain the complete rendering configuration for profiles such as:
 
@@ -1516,7 +1495,7 @@ rather than as the place where all rendering parameters are defined.
 
 ---
 
-# 43. Separation of Responsibilities
+# 42. Separation of Responsibilities
 
 The architecture can be divided into several logical layers.
 
@@ -1576,7 +1555,7 @@ This separation allows the thresholds and normalization logic to be modified ind
 
 ---
 
-# 44. Reset Behavior
+# 43. Reset Behavior
 
 When a new file starts, the script resets the previous video's state.
 
@@ -1598,7 +1577,7 @@ This prevents parameters from the previous video from affecting the new one.
 
 ---
 
-# 45. High-Level Algorithm
+# 44. High-Level Algorithm
 
 In simplified pseudocode:
 
@@ -1783,7 +1762,7 @@ You must define these profiles yourself in `mpv.conf` with the settings you pref
    - Bit-depth multiplier
    - HDR penalty/bonus
    - Cartoon multiplier (higher for animated content)
-   - Frame-rate correction (e.g. 50/60 fps → treated closer to 24 fps)
+   - Frame-rate correction (high framerates are normalized closer to 24 fps for accurate bitrate assessment)
 3. The normalized bitrate is compared against thresholds:
 
 | Resolution | HQ threshold | MQ threshold |
