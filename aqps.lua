@@ -2,7 +2,7 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.2.3
+-- Version: 1.2.4
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
@@ -836,8 +836,10 @@ local function apply_video_quality_profile()
         local height = mp.get_property_number("height") or 0
         local youtube_profile
 
-        if height > 1080 then
+        if height > 1440 then
             youtube_profile = "YouTube UHD"
+        elseif height > 1080 then
+            youtube_profile = "YouTube QHD"
         elseif height == 1080 then
             youtube_profile = "YouTube HD"
         else
