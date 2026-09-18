@@ -2,7 +2,7 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.2.2
+-- Version: 1.2.3
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
@@ -207,18 +207,30 @@ end
 
 -- Extract video title or filename
 local function get_video_name()
+    local title = mp.get_property("media-title")
     local path = state.video_path or ""
-    local is_youtube = path:match("^https?://.*youtube%.com") or path:match("^https?://youtu%.be")
 
-    if is_youtube then
-        local title = mp.get_property("media-title")
-
-        if title and title ~= "" then
+    if title and title ~= "" then
+        local t_lower = title:lower()
+        if not t_lower:match("m3u8") and not t_lower:match("googlevideo") and not t_lower:match("^https?://") then
             return title
         end
     end
 
-    return ((path or "Unknown"):match("[^/\\]+$") or "Unknown"):gsub("%.[^%.]+$", "")
+    local filename = path:match("[^/\\]+$") or "Unknown"
+
+    if path:match("^https?://") then
+        if path:match("youtube%.com") or path:match("youtu%.be") or path:match("googlevideo%.com") then
+            return "YouTube Stream"
+        elseif path:match("%.m3u8") then
+            return "HLS Network Stream"
+        end
+
+        filename = filename:gsub("%?.*$", "")
+        return filename:gsub("%.[^%.]+$", "")
+    end
+
+    return filename:gsub("%.[^%.]+$", "")
 end
 
 -- ======================================
@@ -227,7 +239,8 @@ end
 
 -- Detect special sources like YouTube, DVD, or specific shows
 local function get_special_file_type(path)
-    if path:match("^https?://.*youtube%.com") or path:match("^https?://youtu%.be") then
+    if path:match("^https?://.*youtube%.com") or path:match("^https?://youtu%.be") or path:match("%.m3u8") or
+        path:match("googlevideo%.com") then
         return "youtube"
     end
 
@@ -1061,6 +1074,8 @@ local function generate_static_osd_info()
     local dw, dh = mp.get_property_number("width", 0), mp.get_property_number("height", 0)
     local avg_bitrate = state.avg_video_bitrate
     local profile = state.display_profile or "Loading..."
+    local filename = (state.video_path or ""):lower()
+    local is_hdtv = filename:find("hdtv")
 
     state.video_name = get_video_name()
     state.osd_hdr_text = " " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")
@@ -1084,7 +1099,17 @@ local function generate_static_osd_info()
     if profile:find("^DVD") or profile:find("YouTube") then
         state.osd_profile_line = "Profile: " .. profile
     elseif avg_bitrate then
-        state.osd_profile_line = "Profile: " .. build_profile_osd_string(profile)
+        if profile == "HDTV" then
+            local prefix = (state.video_bitrate_source == "calc") and "~" or ""
+            local applied_text = fmt_bitrate(avg_bitrate)
+            local orig_text = state.is_cartoon and fmt_bitrate(avg_bitrate / (state.cartoon_multiplier or 1.0)) or
+                                  applied_text
+            local disp = state.is_cartoon and string.format("%s (%s*c)", orig_text, applied_text) or applied_text
+            state.osd_profile_line = string.format("Profile: %s [%s%s Mbps @ %s]", profile, prefix, disp,
+                state.video_bitrate_source)
+        else
+            state.osd_profile_line = "Profile: " .. build_profile_osd_string(profile)
+        end
     else
         state.osd_profile_line = string.format("Profile: %s%s [n/a]", profile, state.osd_hdr_text)
     end
@@ -1126,7 +1151,7 @@ local function generate_static_osd_info()
             if c then
                 disp = string.format("Contrast Adaptive Sharpening [%s]", c)
             end
-            table.insert(shader_lines, string.format("　%d. %s", i, disp))
+            table.insert(shader_lines, string.format(" %d. %s", i, disp))
         end
         state.osd_shader_line = "Shaders:\\N" .. table.concat(shader_lines, "\\N")
     else
