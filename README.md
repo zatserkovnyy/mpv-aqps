@@ -363,7 +363,8 @@ The script explicitly checks for `youtube.com` and `youtu.be` URLs. For these Yo
 Regular HTTP/HTTPS network streams (such as direct links, Plex, or Jellyfin) are now treated as standard files, allowing the script to accurately estimate their bitrate instead of blindly applying YouTube profiles.
 
 ```text
->1080p  → YouTube UHD
+>1440p  → YouTube UHD
+>1080p  → YouTube QHD
 1080p   → YouTube HD
 <1080p  → YouTube SD
 ```
@@ -1220,7 +1221,7 @@ Get video path
      ▼
 Detect special file type
      │
-     ├── YouTube ───────► YouTube UHD / HD / SD
+     ├── YouTube ───────► YouTube UHD / QHD / HD / SD
      │
      ├── DVD ───────────► DVD
      │
@@ -1589,7 +1590,7 @@ ON FILE LOADED:
     identify file type
 
     IF YouTube:
-        choose UHD / HD / SD profile
+        choose UHD / QHD / HD / SD profile
         disable normal HDR handling
         apply profile
         stop
@@ -1704,6 +1705,7 @@ The script looks for these exact profile names in your `mpv.conf`:
 [hdtv]
 [dvd]
 [YouTube UHD]
+[YouTube QHD]
 [YouTube HD]
 [YouTube SD]
 [2160p-HQ]
@@ -1722,14 +1724,15 @@ You must define these profiles yourself in `mpv.conf` with the settings you pref
 
 ### Special cases
 
-| Source              | Applied profile     |
-|---------------------|---------------------|
-| YouTube ≥ 4K        | `YouTube UHD`       |
-| YouTube 1080p       | `YouTube HD`        |
-| YouTube < 1080p     | `YouTube SD`        |
-| DVD / VOB / IFO     | `dvd`               |
-| Filename contains `hdtv` | `hdtv` |
-| HDR content         | additionally applies `hdr` |
+| Source                   | Applied profile            |
+| ------------------------ | -------------------------- |
+| YouTube > 1440p          | `YouTube UHD`              |
+| YouTube > 1080p          | `YouTube QHD`              |
+| YouTube 1080p            | `YouTube HD`               |
+| YouTube < 1080p          | `YouTube SD`               |
+| DVD / VOB / IFO          | `DVD`                      |
+| Filename contains `hdtv` | `HDTV`                     |
+| HDR content              | additionally applies `hdr` |
 
 ## Requirements
 
@@ -1832,6 +1835,18 @@ deband-range=14
 deband-grain=4
 
 [YouTube UHD]
+glsl-shaders-clr
+glsl-shaders="~~/shaders/KrigBilateral.glsl"
+glsl-shaders-append="~~/shaders/SSimDownscaler.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
+linear-downscaling=no
+deband=yes
+deband-iterations=1
+deband-threshold=16
+deband-range=8
+deband-grain=1
+
+[YouTube QHD]
 glsl-shaders-clr
 glsl-shaders="~~/shaders/KrigBilateral.glsl"
 glsl-shaders-append="~~/shaders/SSimDownscaler.glsl"
