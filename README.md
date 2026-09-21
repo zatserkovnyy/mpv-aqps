@@ -1799,72 +1799,66 @@ Because the script only *selects* profiles, you have full control over the actua
 
 <img width="2676" height="966" alt="osd-2" src="https://github.com/user-attachments/assets/3711b279-9538-406c-9d97-af9f89ffbabe" />
 
-## Sample mpv.conf (e.g., for my 1080p PJ)
+## Sample Profiles for mpv.conf (e.g., for my 1080p Projector)
+> **Note:** The numeric suffixes (e.g., `0.1` to `0.5`) in the profile names correspond to the sharpening strength (`#define curve_height <value>`) configured inside respective copies or presets of your `adaptive-sharpen.glsl` shader file.
 
 <details>
 <br>
 
 ```ini
-profile=high-quality
-
 [hdr]
 tone-mapping=mobius
 hdr-compute-peak=yes
 tone-mapping-param=0.01
 
-[hdtv]
+[kvn]
 glsl-shaders-clr
 glsl-shaders="~~/shaders/SSimSuperRes.glsl"
 glsl-shaders-append="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
-deband=yes
-deband-iterations=1
-deband-threshold=22
-deband-range=12
-deband-grain=2
-
-[dvd]
-glsl-shaders-clr
-glsl-shaders="~~/shaders/FSRCNNX_x2_16-0-4-1.glsl"
-glsl-shaders-append="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
-deband=yes
-deband-iterations=2
-deband-threshold=22
-deband-range=14
-deband-grain=4
-
-[YouTube UHD]
-glsl-shaders-clr
-glsl-shaders="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/SSimDownscaler.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
-linear-downscaling=no
-deband=yes
-deband-iterations=1
-deband-threshold=16
-deband-range=8
-deband-grain=1
-
-[YouTube QHD]
-glsl-shaders-clr
-glsl-shaders="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/SSimDownscaler.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
-linear-downscaling=no
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.1.glsl"
 deband=yes
 deband-iterations=1
 deband-threshold=18
 deband-range=10
 deband-grain=2
 
+[dvd]
+glsl-shaders-clr
+glsl-shaders="~~/shaders/FSRCNNX_x2_16-0-4-1.glsl"
+glsl-shaders-append="~~/shaders/KrigBilateral.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.4.glsl"
+deband=yes
+deband-iterations=2
+deband-threshold=20
+deband-range=12
+deband-grain=4
+
+[YouTube UHD]
+glsl-shaders-clr
+glsl-shaders="~~/shaders/KrigBilateral.glsl"
+glsl-shaders-append="~~/shaders/SSimDownscaler.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.2.glsl"
+linear-downscaling=no
+
+[YouTube QHD]
+glsl-shaders-clr
+glsl-shaders="~~/shaders/KrigBilateral.glsl"
+glsl-shaders-append="~~/shaders/SSimDownscaler.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.2.glsl"
+linear-downscaling=no
+deband=yes
+deband-iterations=1
+deband-threshold=16
+deband-range=10
+deband-grain=2
+
 [YouTube HD]
 glsl-shaders-clr
 glsl-shaders="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.3.glsl"
 deband=yes
-deband-iterations=1
-deband-threshold=20
+deband-iterations=2
+deband-threshold=18
 deband-range=12
 deband-grain=3
 
@@ -1872,100 +1866,100 @@ deband-grain=3
 glsl-shaders-clr
 glsl-shaders="~~/shaders/FSRCNNX_x2_16-0-4-1.glsl"
 glsl-shaders-append="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.4.glsl"
 deband=yes
 deband-iterations=2
 deband-threshold=22
-deband-range=14
+deband-range=12
 deband-grain=4
 
 [2160p-HQ]
 glsl-shaders-clr
 glsl-shaders="~~/shaders/KrigBilateral.glsl"
 glsl-shaders-append="~~/shaders/SSimDownscaler.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.1.glsl"
 linear-downscaling=no
 
 [2160p-MQ]
 glsl-shaders-clr
 glsl-shaders="~~/shaders/KrigBilateral.glsl"
 glsl-shaders-append="~~/shaders/SSimDownscaler.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.2.glsl"
 linear-downscaling=no
+deband=yes
+deband-iterations=1
+deband-threshold=16
+deband-range=10
+deband-grain=1
+
+[2160p-LQ]
+glsl-shaders-clr
+glsl-shaders="~~/shaders/KrigBilateral.glsl"
+glsl-shaders-append="~~/shaders/SSimDownscaler.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.3.glsl"
+linear-downscaling=no
+deband=yes
+deband-iterations=2
+deband-threshold=18
+deband-range=12
+deband-grain=2
+
+[1080p-HQ]
+glsl-shaders-clr
+glsl-shaders="~~/shaders/KrigBilateral.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.3.glsl"
+
+[1080p-MQ]
+glsl-shaders-clr
+glsl-shaders="~~/shaders/KrigBilateral.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.4.glsl"
 deband=yes
 deband-iterations=1
 deband-threshold=18
 deband-range=10
 deband-grain=2
 
-[2160p-LQ]
-glsl-shaders-clr
-glsl-shaders="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/SSimDownscaler.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
-linear-downscaling=no
-deband=yes
-deband-iterations=2
-deband-threshold=20
-deband-range=12
-deband-grain=3
-
-[1080p-HQ]
-glsl-shaders-clr
-glsl-shaders="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
-
-[1080p-MQ]
-glsl-shaders-clr
-glsl-shaders="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
-deband=yes
-deband-iterations=1
-deband-threshold=20
-deband-range=12
-deband-grain=2
-
 [1080p-LQ]
 glsl-shaders-clr
 glsl-shaders="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.5.glsl"
 deband=yes
 deband-iterations=2
-deband-threshold=24
-deband-range=14
+deband-threshold=20
+deband-range=12
 deband-grain=3
 
 [720p-HQ]
 glsl-shaders-clr
 glsl-shaders="~~/shaders/FSRCNNX_x2_16-0-4-1.glsl"
 glsl-shaders-append="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.3.glsl"
 deband=yes
 deband-iterations=1
-deband-threshold=20
-deband-range=12
+deband-threshold=18
+deband-range=10
 deband-grain=2
 
 [720p-MQ]
 glsl-shaders-clr
 glsl-shaders="~~/shaders/FSRCNNX_x2_16-0-4-1.glsl"
 glsl-shaders-append="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.4.glsl"
 deband=yes
-deband-iterations=1
-deband-threshold=22
-deband-range=14
+deband-iterations=2
+deband-threshold=18
+deband-range=12
 deband-grain=3
 
 [720p-LQ]
 glsl-shaders-clr
 glsl-shaders="~~/shaders/FSRCNNX_x2_16-0-4-1.glsl"
 glsl-shaders-append="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.5.glsl"
 deband=yes
 deband-iterations=2
-deband-threshold=26
-deband-range=16
+deband-threshold=22
+deband-range=14
 deband-grain=4
 
 [480p]
@@ -1973,17 +1967,19 @@ glsl-shaders-clr
 glsl-shaders="~~/shaders/FSRCNNX_x2_16-0-4-1.glsl"
 glsl-shaders-append="~~/shaders/SSimSuperRes.glsl"
 glsl-shaders-append="~~/shaders/KrigBilateral.glsl"
-glsl-shaders-append="~~/shaders/adaptive-sharpen.glsl"
+glsl-shaders-append="~~/shaders/adaptive-sharpen-0.4.glsl"
 deband=yes
 deband-iterations=2
-deband-threshold=26
-deband-range=16
+deband-threshold=22
+deband-range=14
 deband-grain=4
 ```
 
 </details>
 
-## FFprobe download
+## FFprobe download (Windows only)
+
+> **Note:** The `ffprobe.exe` binary is located inside the `bin` folder of the downloaded archive.
 
 [GyanD/codexffmpeg Releases](https://github.com/GyanD/codexffmpeg/releases)
 
@@ -1992,7 +1988,6 @@ deband-grain=4
 Please note: this script is designed to be fully cross-platform (Windows, macOS, Linux). However, since I primarily develop on Windows and currently cannot test directly on macOS or Linux environments, please feel free to open an issue or provide feedback if you encounter any platform-specific bugs!
 
 - All threshold values, bitrates, multipliers, and factors (such as codec efficiencies, HDR bonuses, and custom cartoon detection titles) are defined right at the top of the script under the `CONSTANTS` section. You can easily tweak any number in the code to perfectly match your specific display, projector, or hardware capabilities.
-- The script is heavily optimized for **1080p projectors**, but the 2160p profiles and logic are fully functional for 4K displays.
 - For best results keep `ffprobe` up to date.
 - External audio tracks and network streams are handled gracefully (bitrate estimation falls back when necessary).
 - If you encounter any bugs, errors, or have ideas on how to improve the script, please let me know! You can open an **Issue** here on GitHub or submit a **Pull Request**. I will gladly find the time to review your feedback and fix any problems.
