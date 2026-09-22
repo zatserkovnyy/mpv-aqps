@@ -22,8 +22,10 @@ On every file load the script:
    - Video resolution, FPS, bit depth, codec, pixel format (or hwdec fallback), and current playback bitrate
    - Audio track details (language, title, readable codec, channels, bitrate, and track index/total)
    - Subtitle track details (language, title, format type, and track index/total)
-   - Active tone-mapping algorithm, 3D LUT, debanding parameters, and loaded shaders list
+   - Active tone-mapping algorithm
+   - 3D LUT
    - Selected quality profile (with HDR/SDR tag) and detailed average bitrate calculation breakdown (showing raw bitrate, data source, and applied modifier coefficients)
+   - Debanding parameters
    - Numbered list of active GLSL shaders
   
 ### Core Logic
@@ -1731,8 +1733,8 @@ You must define these profiles yourself in `mpv.conf` with the settings you pref
 | YouTube > 1080p          | `YouTube QHD`              |
 | YouTube 1080p            | `YouTube HD`               |
 | YouTube < 1080p          | `YouTube SD`               |
-| DVD / VOB / IFO          | `DVD`                      |
-| Filename contains `hdtv` | `HDTV`                     |
+| DVD / VOB / IFO          | `dvd`                      |
+| Filename contains `hdtv` | `hdtv`                     |
 | HDR content              | additionally applies `hdr` |
 
 ## Requirements
