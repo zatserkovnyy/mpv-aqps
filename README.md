@@ -1780,19 +1780,51 @@ You must define these profiles yourself in `mpv.conf` with the settings you pref
 
 4. The matching profile (`…-HQ` / `…-MQ` / `…-LQ`) is applied.
 
-## What you can (and should) customize
+## Configuration & Tuning (Advanced)
 
-All important values are defined as constants at the top of the script and can be freely changed:
+All essential thresholds, multipliers, and configuration values are located at the very top of `aqps.lua` in the `CONSTANTS` section. You can easily edit these values in a text editor to fine-tune the script's logic to perfectly match your specific display, processing power, or personal preferences.
 
-- Bitrate thresholds (`BITRATE_2160_HQ`, `BITRATE_1080_HQ`, …)
-- Codec equivalence factors (`CODEC_EQUIV_FACTOR_2160`, `…_1080`, etc.)
-- HDR multipliers (`HDR_FACTOR_HQ / MQ / LQ`)
-- Bit-depth multipliers
-- Cartoon multipliers and list of cartoon show names
-- Base audio bitrate estimates
-- OSD behaviour and key bindings
+### Quality Thresholds (Bitrate in Mbps)
+These constants define the minimum **normalized** bitrate required to assign a specific quality profile (`HQ` or `MQ`). If the normalized bitrate falls below the `MQ` threshold, the `LQ` (Low Quality) profile is applied.
+* **`BITRATE_2160_HQ` / `BITRATE_2160_MQ`** (Default: `24` / `12`)
+* **`BITRATE_1080_HQ` / `BITRATE_1080_MQ`** (Default: `12` / `6`)
+* **`BITRATE_720_HQ` / `BITRATE_720_MQ`** (Default: `4` / `2.5`)
 
-Because the script only *selects* profiles, you have full control over the actual image processing by editing the corresponding sections in `mpv.conf`.
+### Codec Equivalence Factors
+These tables define how efficient each codec is compared to a baseline. The script divides the source bitrate by this factor to calculate the "equivalent" baseline bitrate. Higher values mean the codec is heavily penalized, while lower values mean it is considered highly efficient. 
+* **`CODEC_EQUIV_FACTOR_2160`**
+* **`CODEC_EQUIV_FACTOR_1080`**
+* **`CODEC_EQUIV_FACTOR_720`**
+* **`CODEC_EQUIV_FACTOR_480`**
+> *Supported codecs: `h264`, `avc1`, `hevc`, `h265`, `hev1`, `vp8`, `vp9`, `av1`*
+
+### HDR Normalization Factors
+These divisors are applied to the bitrate if the video is detected as HDR. A higher factor applies a slightly stronger penalty to HDR content when evaluating its quality tier.
+* **`HDR_FACTOR_HQ`** (Default: `1.03`)
+* **`HDR_FACTOR_MQ`** (Default: `1.05`)
+* **`HDR_FACTOR_LQ`** (Default: `1.08`)
+
+### Bit-Depth Multipliers
+These multipliers reward higher color bit depths by slightly inflating their equivalent bitrate.
+* **`BIT_DEPTH_MULTIPLIER`** (Default: 8-bit = `1.00`, 10-bit = `1.08`, 12-bit = `1.15`, 16-bit = `1.20`)
+
+### Cartoon & Animation Detection
+Animated content typically requires less bitrate to look clean. The script applies a bonus multiplier if the filename matches specific keywords.
+* **`CARTOON_SHOWS`**: A list of strings used to detect animated content (e.g., `"futurama"`, `"simpsons"`, `"south.park"`, `"gravity.falls"`).
+* **`CARTOON_MULTIPLIER`**: The resolution-specific bonus applied to detected cartoons (Default: 480p = `1.50`, 720p = `1.60`, 1080p = `1.70`, 2160p = `1.90`).
+
+### Audio Bitrate Fallbacks
+When the actual audio bitrate is unavailable, the script uses these baseline values (in Mbps) based on the audio codec to estimate the video bitrate from the total file size.
+* **`DEFAULT_AUDIO_BITRATE`** (Default: `0.192`)
+* **`ATMOS_BONUS`** (Default: `0.512`)
+* **`BASE_AUDIO_BITRATES`**: A table containing fallback estimates for codecs like `truehd`, `dts-hd`, `flac`, `pcm`, `dts`, `ac3`, `aac`, `opus`, etc.
+
+### Timers & Caches
+* **`FFPROBE_CACHE_SEC`**: How long (in seconds) the script caches `ffprobe` results for a specific file (Default: `60`).
+* **`OSD_REFRESH_SEC`**: The refresh interval (in seconds) for the custom OSD clock and ETA updates (Default: `1`).
+* **`TRACK_UPDATE_DELAY_SEC`**: The debounce delay applied when rapidly switching tracks to prevent UI lag (Default: `0.1`).
+
+> **Note:** Because the script only *selects* profiles, you have full control over the actual image processing by editing the corresponding sections in your `mpv.conf`.
 
 ## Sample OSD
 
@@ -1814,7 +1846,7 @@ tone-mapping=mobius
 hdr-compute-peak=yes
 tone-mapping-param=0.01
 
-[kvn]
+[hdtv]
 glsl-shaders-clr
 glsl-shaders="~~/shaders/SSimSuperRes.glsl"
 glsl-shaders-append="~~/shaders/KrigBilateral.glsl"
