@@ -17,13 +17,14 @@ On every file load the script:
 4. Selects and applies one of the quality profiles listed below.
 5. Detects special sources (YouTube, DVD, custom `hdtv` files) and applies dedicated profiles.
 6. Shows a rich custom OSD (toggled with `Home` key) containing:
-   - File name / title
-   - Current time, progress, remaining time and estimated end time
-   - Video resolution, FPS, bit depth, codec, pixel format and bitrate
-   - Audio track details (language, title, codec, channels, bitrate)
-   - Subtitle track details
-   - Active tone-mapping, 3D LUT, debanding settings and loaded shaders
-   - Selected quality profile with detailed bitrate calculation breakdown
+   - File name, media title, or intelligent network stream name (e.g., YouTube/HLS)
+   - System clock, playback position, progress (%), total duration, remaining time, and exact playback end time (ETA)
+   - Video resolution, FPS, bit depth, codec, pixel format (or hwdec fallback), and current playback bitrate
+   - Audio track details (language, title, readable codec, channels, bitrate, and track index/total)
+   - Subtitle track details (language, title, format type, and track index/total)
+   - Active tone-mapping algorithm, 3D LUT, debanding parameters, and loaded shaders list
+   - Selected quality profile (with HDR/SDR tag) and detailed average bitrate calculation breakdown (showing raw bitrate, data source, and applied modifier coefficients)
+   - Numbered list of active GLSL shaders
   
 ### Core Logic
 
