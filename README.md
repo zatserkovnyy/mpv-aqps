@@ -28,7 +28,7 @@ On every file load the script:
    - Debanding parameters
    - Numbered list of active GLSL shaders
   
-### Core Logic
+### Core Logic: How It Works
 
 <details>
 <br>
@@ -104,6 +104,8 @@ These thresholds are applied to the **normalized bitrate**, not necessarily to t
 
 This distinction is important because two files with the same raw bitrate can have very different visual quality depending on their codec and other characteristics.
 
+> These tiers dictate the required intensity of post-processing. An **HQ** (High Quality) classification implies a pristine source that needs minimal intervention (allowing for sharper upscaling). Conversely, an **LQ** (Low Quality) classification indicates heavy compression, signaling your `mpv.conf` to apply aggressive artifact mitigation, such as heavy debanding or smoothing shaders, to make the image watchable.
+
 ---
 
 # 3. Codec Normalization
@@ -146,6 +148,8 @@ Therefore, the script treats the same raw bitrate differently depending on codec
 
 The codec tables are different for 2160p, 1080p, 720p and 480p.
 
+> Modern video codecs achieve equivalent visual fidelity at drastically different data rates. For instance, an AV1 or HEVC stream requires significantly less raw bitrate to match or exceed the perceptual clarity of an older H.264 stream. By normalizing against codec-specific compression efficiency factors, the script prevents high-efficiency encodes from being unfairly demoted to lower-quality profiles simply because of their compact file size.
+
 ---
 
 # 4. HDR Normalization
@@ -179,6 +183,8 @@ The normalized bitrate is divided by `1.03`.
 
 This provides a small bitrate penalty for HDR material during quality classification.
 
+> High Dynamic Range content requires significantly more data to encode its wider luminance range (PQ/HLG) and fine specular/shadow gradients without banding. Consequently, an HDR stream at a given bitrate typically exhibits more compression strain than an SDR stream at the exact same bitrate. The normalization divisor compensates for this overhead, bringing HDR evaluation down to an equivalent perceptual visual quality baseline.
+
 ---
 
 # 5. Bit Depth Normalization
@@ -207,6 +213,8 @@ normalized_bitrate =
 ```
 
 Therefore, a 10-bit source receives a small positive adjustment compared with an otherwise identical 8-bit source.
+
+> Higher color depths (10-bit, 12-bit) provide exponentially more color shades per channel (1024 vs. 256), drastically reducing color banding in smooth gradients and dark scenes. Because the encoder has greater mathematical precision, 10-bit encoding is actually more efficient and produces a cleaner, more resilient image than an 8-bit encode at the exact same bitrate. The multiplier acts as a bonus, rewarding this superior perceptual quality.
 
 ---
 
@@ -253,6 +261,8 @@ for quality classification.
 
 This allows animation to be evaluated differently from live-action material.
 
+> Traditional 2D animation and modern 3D cartoons consist largely of flat colors, clean outlines, and static backgrounds, making them exceptionally compressible. Video encoders can achieve pristine, artifact-free visual quality at a fraction of the bitrate required for complex live-action footage (which struggles with film grain, fine textures, and chaotic motion). Without this multiplier, a perfectly clean 5 Mbps cartoon would be unfairly penalized and classified as "Low Quality". The multiplier inflates its equivalent bitrate to ensure it correctly receives a higher-quality processing profile.
+
 ---
 
 # 7. Audio Bitrate Estimation
@@ -298,6 +308,8 @@ The script also detects `Atmos` in the audio track title and adds an Atmos bitra
 ```
 
 Audio bitrate calculations are cached by track ID.
+
+> When the exact video bitrate cannot be extracted via FFprobe, the script calculates it by subtracting the audio bitrate from the total file bitrate (derived from file size and duration). Modern lossless audio tracks (like TrueHD Atmos or DTS-HD MA) can consume anywhere from 4 to 8 Mbps of bandwidth. If the script blindly used a standard 192 kbps fallback for everything, it would severely overestimate the video bitrate of files with heavy uncompressed audio, resulting in an artificially high quality classification. Accurately estimating the audio weight ensures the remaining video bitrate calculation remains precise.
 
 ---
 
@@ -492,6 +504,8 @@ Therefore:
 for quality classification.
 
 This prevents high-frame-rate video from receiving an artificially high quality classification simply because it contains more frames per second.
+
+> Bitrate is measured per second, not per frame. If a standard 24fps movie and a 60fps video both share a bitrate of 10 Mbps, the 60fps encoder must stretch that exact same amount of data across 2.5 times as many frames. While modern inter-frame compression makes this relationship non-linear (you don't need 2.5x the bitrate for identical quality), a 60fps video is still significantly more compressed *per frame* than its 24fps counterpart. Normalizing the frame rate mathematically penalizes (deflates) the equivalent bitrate of HFR content, ensuring it is judged fairly against the script's standard 24/30fps quality thresholds.
 
 ---
 
