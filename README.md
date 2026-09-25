@@ -1771,8 +1771,8 @@ You must define these profiles yourself in `mpv.conf` with the settings you pref
 
 | Key        | Action                          |
 |------------|---------------------------------|
-| `Home`     | Toggle detailed custom OSD      |
-| `Menu`     | Hide custom OSD + show stats    |
+| `HOME`     | Toggle detailed custom OSD      |
+| `MENU`     | Hide custom OSD + show stats    |
 
 ## How the quality decision works
 
