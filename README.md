@@ -16,7 +16,7 @@ On every file load the script:
    - Cartoon content (applies higher multiplier)
 4. Selects and applies one of the quality profiles listed below.
 5. Detects special sources (YouTube, DVD, custom `hdtv` files) and applies dedicated profiles.
-6. Shows a rich custom OSD (toggled with `Home` key) containing:
+6. Shows a rich custom OSD (toggled with `HOME` key) containing:
    - File name, media title, or intelligent network stream name (e.g., YouTube/HLS)
    - System clock, playback position, progress (%), total duration, remaining time, and exact playback end time (ETA)
    - Video resolution, FPS, bit depth, codec, pixel format (or hwdec fallback), and current playback bitrate
@@ -1741,15 +1741,15 @@ You must define these profiles yourself in `mpv.conf` with the settings you pref
 
 ### Special cases
 
-| Source                   | Applied profile            |
-| ------------------------ | -------------------------- |
-| YouTube > 1440p          | `YouTube UHD`              |
-| YouTube > 1080p          | `YouTube QHD`              |
-| YouTube 1080p            | `YouTube HD`               |
-| YouTube < 1080p          | `YouTube SD`               |
-| DVD / VOB / IFO          | `dvd`                      |
-| Filename contains `hdtv` | `hdtv`                     |
-| HDR content              | additionally applies `hdr` |
+| Source                   | Applied profile                    |
+| ------------------------ | ---------------------------------- |
+| YouTube > 1440p          | `YouTube UHD`                      |
+| YouTube > 1080p          | `YouTube QHD`                      |
+| YouTube 1080p            | `YouTube HD`                       |
+| YouTube < 1080p          | `YouTube SD`                       |
+| DVD / VOB / IFO          | `dvd`                              |
+| Filename contains `hdtv` | `hdtv`                             |
+| HDR content              | additionally applies `hdr` profile |
 
 ## Requirements
 
@@ -2036,7 +2036,6 @@ deband-grain=4
 
 Please note: this script is designed to be fully cross-platform (Windows, macOS, Linux). However, since I primarily develop on Windows and currently cannot test directly on macOS or Linux environments, please feel free to open an issue or provide feedback if you encounter any platform-specific bugs!
 
-- All threshold values, bitrates, multipliers, and factors (such as codec efficiencies, HDR bonuses, and custom cartoon detection titles) are defined right at the top of the script under the `CONSTANTS` section. You can easily tweak any number in the code to perfectly match your specific display, projector, or hardware capabilities.
 - For best results keep `ffprobe` up to date.
 - External audio tracks and network streams are handled gracefully (bitrate estimation falls back when necessary).
 - If you encounter any bugs, errors, or have ideas on how to improve the script, please let me know! You can open an **Issue** here on GitHub or submit a **Pull Request**. I will gladly find the time to review your feedback and fix any problems.
