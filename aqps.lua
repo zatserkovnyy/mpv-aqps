@@ -2,7 +2,7 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.2.4
+-- Version: 1.2.5
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
@@ -1192,7 +1192,7 @@ local function generate_dynamic_osd_info()
         local abps_kbps_text = (state.audio_bitrate_kbps and state.audio_bitrate_kbps > 0) and
                                    string.format("%d kbps", math.floor(state.audio_bitrate_kbps)) or "n/a"
 
-        state.osd_audio_line = string.format("Audio: [%s]%s | (%s %s @ %s) [%d/%d]", (sel_audio.lang or "und"):upper(),
+        state.osd_audio_line = string.format("Audio: [%s]%s | %s %s @ %s [%d/%d]", (sel_audio.lang or "und"):upper(),
             sel_audio.title and (" " .. sel_audio.title) or "", get_readable_audio_codec_name(sel_audio), chan_text,
             abps_kbps_text, sel_audio_idx, audio_cnt)
     end
