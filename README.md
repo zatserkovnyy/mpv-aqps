@@ -1846,11 +1846,9 @@ When the actual audio bitrate is unavailable, the script uses these baseline val
 
 ## Sample OSD
 
-<img width="2676" height="966" alt="osd-1" src="https://github.com/user-attachments/assets/429d2575-9f4c-4f7b-be31-9e72d328a4fa" />
+<img width="2676" height="966" alt="osd-1" src="https://github.com/user-attachments/assets/de6bd3b2-75a1-4ba7-a3b6-4a4a8ba20ed1" />
 
----
-
-<img width="2676" height="966" alt="osd-2" src="https://github.com/user-attachments/assets/3711b279-9538-406c-9d97-af9f89ffbabe" />
+<img width="2676" height="966" alt="osd-2" src="https://github.com/user-attachments/assets/00cee77b-7f3c-4d31-b812-1dcdda3a826f" />
 
 ## Sample Profiles for mpv.conf (e.g., for my 1080p Projector)
 
