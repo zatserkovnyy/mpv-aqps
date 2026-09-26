@@ -1757,7 +1757,7 @@ You must define these profiles yourself in `mpv.conf` with the settings you pref
 
 ## Requirements
 
-- **ffprobe** must be installed on your system.
+- **FFprobe** must be installed on your system.
   - **Windows:** Place `ffprobe.exe` in the same folder as `mpv.exe` **or** add it to your system `PATH`.
   - **macOS / Linux:** Install via your package manager (e.g., `brew install ffmpeg` or `sudo apt install ffmpeg`). The script automatically detects `ffprobe` in standard locations (such as `/opt/homebrew/bin`, `/usr/local/bin`, or `/usr/bin`) even if your system `PATH` is not fully passed to the mpv GUI application.
 - Profiles listed above must exist in your `mpv.conf` (you define the actual settings inside them).
@@ -1853,7 +1853,6 @@ When the actual audio bitrate is unavailable, the script uses these baseline val
 <img width="2676" height="966" alt="osd-2" src="https://github.com/user-attachments/assets/3711b279-9538-406c-9d97-af9f89ffbabe" />
 
 ## Sample Profiles for mpv.conf (e.g., for my 1080p Projector)
-> **Note:** The numeric suffixes (e.g., `0.1` to `0.5`) in the profile names correspond to the sharpening strength (`#define curve_height <value>`) configured inside respective copies or presets of your `adaptive-sharpen.glsl` shader file.
 
 <details>
 <br>
@@ -2030,23 +2029,23 @@ deband-grain=4
 
 </details>
 
-## FFprobe download (Windows only)
+> **Note:** The numeric suffixes (e.g., `0.1` to `0.5`) in the profile names correspond to the sharpening strength (`#define curve_height <value>`) configured inside respective copies or presets of your `adaptive-sharpen.glsl` shader file.
 
-> **Note:** The `ffprobe.exe` binary is located inside the `bin` folder of the downloaded archive.
+## FFprobe download (Windows only)
 
 [GyanD/codexffmpeg Releases](https://github.com/GyanD/codexffmpeg/releases)
 
+> **Note:** The `ffprobe.exe` binary is located inside the `bin` folder of the downloaded archive.
+
 ## Notes
 
-Please note: this script is designed to be fully cross-platform (Windows, macOS, Linux). However, since I primarily develop on Windows and currently cannot test directly on macOS or Linux environments, please feel free to open an issue or provide feedback if you encounter any platform-specific bugs!
+* **Bring Your Own Shaders:** AQPS is a decision engine. It does not contain any built-in shaders or image enhancements. It simply instructs mpv to apply a specific profile (e.g., `[1080p-HQ]`). **You must define these profiles in your `mpv.conf`** for the script to have any visual effect.
+* **Filename Sensitivity:** Special profiles (`hdtv`) and the animation multiplier rely on reading the filename. If your files have stripped, scrambled, or renamed titles (e.g., `video1.mkv`), these specific detection features will be bypassed.
+* **Platform Compatibility:** This script is designed to be fully cross-platform (Windows, macOS, Linux). However, since I primarily develop on Windows and cannot currently test directly on macOS/Linux environments, please feel free to open an issue if you encounter any platform-specific bugs!
+* **External Audio & Streams:** External audio tracks and network streams are handled gracefully (bitrate estimation falls back mathematically when metadata is missing).
+* **Keep FFprobe Updated:** For the most accurate bitrate and codec detection, ensure your `ffprobe` binary is up to date.
 
-- For best results keep `ffprobe` up to date.
-- External audio tracks and network streams are handled gracefully (bitrate estimation falls back when necessary).
-- If you encounter any bugs, errors, or have ideas on how to improve the script, please let me know! You can open an **Issue** here on GitHub or submit a **Pull Request**. I will gladly find the time to review your feedback and fix any problems.
-
----
-
-Drop the script in, define your preferred profiles in `mpv.conf`, and mpv will automatically choose the best settings for every video.
+If you encounter any bugs, errors, or have ideas on how to improve the script, please let me know! You can open an **Issue** here on GitHub or submit a **Pull Request**. I will gladly review your feedback and fix any problems.
 
 ---
 
