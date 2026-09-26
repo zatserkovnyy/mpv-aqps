@@ -40,7 +40,7 @@ The script does not simply compare the source bitrate against fixed thresholds. 
 
 ---
 
-## 1. Overview
+# 1. Overview
 
 The script performs four main tasks:
 
@@ -369,6 +369,8 @@ The result is marked as an estimated value rather than an FFprobe value.
 
 The OSD uses a `~` prefix when the bitrate is estimated.
 
+> Relying strictly on FFprobe to read metadata is insufficient because many popular media containers (especially `.mkv` remuxes or web downloads) simply do not store average video bitrate tags in their headers. If the script only read metadata, it would fail to classify a massive portion of files. By mathematically deriving the total bitrate from the physical file size and duration—and then subtracting the audio weight—the script guarantees a highly accurate video bitrate reading even when the file's internal metadata is completely blank.
+
 ---
 
 # 9. Network Stream / YouTube Handling
@@ -539,6 +541,8 @@ The calculation therefore simplifies to approximately:
 normalized_bitrate =
     source_bitrate / codec_factor
 ```
+
+> This unified equation acts as the ultimate equalizer. Without it, a dynamic script would require hundreds of hardcoded thresholds to account for every possible combination of codec, framerate, bit depth, and HDR format. By mathematically distilling every conceivable video — whether it's a 60fps HDR game capture or a 10-bit HEVC anime — down to a single "reference" SDR 24fps equivalent, the script can confidently rely on just three simple baseline thresholds (HQ, MQ, LQ) to accurately judge the visual quality of an infinite variety of real-world media files.
 
 ---
 
