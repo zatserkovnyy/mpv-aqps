@@ -19,7 +19,7 @@ On every file load the script:
 6. Shows a rich custom OSD (toggled with `HOME` key) containing:
    - File name, media title, or intelligent network stream name (e.g., YouTube/HLS)
    - System clock, playback position, progress (%), total duration, remaining time, and exact playback end time (ETA)
-   - Video resolution, FPS, bit depth, codec, pixel format (or hwdec fallback), and current playback bitrate
+   - Video resolution, FPS, bit depth, codec, hardware decoder / pixel format (e.g., `vulkan:p010` or `yuv420p`), and current playback bitrate
    - Audio track details (language, title, readable codec, channels, bitrate, and track index/total)
    - Subtitle track details (language, title, format type, and track index/total)
    - Active tone-mapping algorithm
@@ -267,16 +267,14 @@ This allows animation to be evaluated differently from live-action material.
 
 # 7. Audio Bitrate Estimation
 
-The script first tries to obtain the actual audio bitrate from mpv.
+When subtracting audio weight during fallback video bitrate calculation, the script first uses exact per-stream audio bitrates fetched via `ffprobe`, or `demux-bitrate` reported by mpv.
 
-If a valid bitrate is available, it is used directly.
-
-If the actual bitrate is unavailable, the script estimates it from:
+If the actual stream bitrate is unavailable in metadata, the script estimates it from:
 
 - Codec
 - Codec profile (for accurate DTS-HD Master Audio detection)
-- Channel count
-- Sample rate
+- Channel count (`demux-channel-count`)
+- Sample rate (`demux-samplerate`)
 - Track information
 - Atmos indication
 
@@ -319,11 +317,12 @@ The script has two primary methods for obtaining the video bitrate.
 
 ## 8.1. FFprobe
 
-For local files, the script uses `ffprobe` to obtain:
+For local files, the script uses a single `ffprobe` call to obtain:
 
 - Video bitrate
 - Frame rate
-- `BPS` stream tag
+- Individual audio stream bitrates
+- `BPS` stream tags
 
 The returned data is parsed and converted to Mbps.
 
@@ -345,24 +344,24 @@ The FFprobe result is cached for 60 seconds.
 
 ## 8.2. Bitrate Fallback Calculation
 
-If FFprobe cannot provide the video bitrate, the script estimates it from:
+If FFprobe cannot provide the video bitrate directly, the script estimates it from:
 
-- Total file size
+- Total file size (adjusted by `0.995` to account for container overhead)
 - Duration
-- Estimated audio bitrate
+- Total bitrate of all internal audio tracks (from FFprobe, mpv's `demux-bitrate`, or codec estimation)
 
 The approximate total bitrate calculation is:
 
 ```text
 total_bitrate =
-    file_size × 8 / duration / 1,000,000
+    (file_size × 8 / duration / 1,000,000) × 0.995
 ```
 
 The estimated video bitrate is then calculated approximately as:
 
 ```text
 video_bitrate =
-    total_bitrate - audio_bitrate
+    total_bitrate - sum_of_internal_audio_bitrates
 ```
 
 The result is marked as an estimated value rather than an FFprobe value.
@@ -586,49 +585,34 @@ The selected profile is cached using the file path and resolution.
 
 # 16. HDR Detection
 
-HDR detection is based on mpv's:
-
-```text
-video-out-params
-```
+HDR detection is based on mpv's `video-out-params` (with a fallback to `video-params` on initial load) and the selected video track in `track-list`.
 
 The script examines parameters such as:
 
-- Gamma
-- Primaries
-- Color matrix
-- Dolby Vision information
-- HDR10+ information
-- SL-HDR information
-- Technicolor information
+- Transfer function (`gamma`: `pq` or `hlg`)
+- Color matrix (`dolbyvision`)
+- Track property `dolby-vision-profile`
+- Dynamic HDR10+ scene metadata (`scene-max-r`)
 
-The detection logic is approximately:
+*(Note: `bt.2020` primaries alone do not trigger HDR detection to avoid false positives on SDR BT.2020 content).*
+
+The detection logic is:
+
 
 ```text
-HLG gamma
-    ↓
-HLG / HLG10
-
-PQ or BT.2020
-    ↓
-    Dolby Vision?
-        ↓ yes
-        Dolby Vision
-
-    HDR10+?
-        ↓ yes
-        HDR10+
-
-    SL-HDR?
-        ↓ yes
-        SL-HDR
-
-    Technicolor HDR?
-        ↓ yes
-        Technicolor HDR
-
-    otherwise
-        HDR10
+Check video-out-params & video track
+     │
+     ├── HLG gamma ───────────────────────────────────► HLG
+     │
+     ├── PQ gamma or Dolby Vision matrix
+     │        │
+     │        ├── Dolby Vision profile / matrix? ─────► Dolby Vision
+     │        │
+     │        ├── HDR10+ metadata (scene-max-r)? ─────► HDR10+
+     │        │
+     │        └── Otherwise ──────────────────────────► HDR10
+     │
+     └── Otherwise ───────────────────────────────────► SDR
 ```
 
 When HDR is detected, the script activates:
@@ -637,10 +621,11 @@ When HDR is detected, the script activates:
 hdr
 ```
 
-When HDR is no longer detected, it switches back to:
+When switching back to SDR (or loading special sources like YouTube, DVD, or HDTV), it restores the previous settings via:
 
 ```text
-default
+apply-profile hdr restore
+apply-profile default
 ```
 
 HDR changes are handled dynamically through mpv property observers.
@@ -684,7 +669,7 @@ quality_profile_cache
 
 ### FFprobe cache
 
-Stores video bitrate and FPS information.
+Stores video bitrate, FPS, and audio stream bitrates.
 
 Entries remain valid for:
 
@@ -1164,7 +1149,7 @@ The script resets:
 - Cartoon state
 - FPS correction state
 
-It also clears:
+It also restores the `hdr` profile (if active), applies `default`, clears:
 
 ```text
 deband
@@ -1173,7 +1158,7 @@ glsl-shaders
 
 and removes the current OSD.
 
-This prevents settings from the previous file from leaking into the next one.
+This prevents settings and cached bitrates from the previous file from leaking into the next one.
 
 ---
 
@@ -1181,13 +1166,11 @@ This prevents settings from the previous file from leaking into the next one.
 
 After mpv has loaded the file, the script:
 
-1. Obtains the video path.
-2. Resets video-specific state.
-3. Determines the appropriate quality profile.
-4. Applies the profile.
-5. Generates static OSD information.
-6. Generates dynamic OSD information.
-7. Refreshes the OSD if it is currently visible.
+1. Obtains the video path and disables HDR detection if the source is a special type (YouTube, DVD, HDTV).
+2. Evaluates and applies/restores the HDR profile before calculating quality thresholds.
+3. Determines and applies the appropriate quality profile (if video dimensions or duration are not yet initialized on slow/network streams, `video-out-params` and `duration` observers automatically retry once ready).
+4. Generates static and dynamic OSD information.
+5. Refreshes the OSD if it is currently visible.
 
 This is effectively the main initialization stage for every new video.
 
@@ -1741,7 +1724,7 @@ The script looks for these exact profile names in your `mpv.conf`:
 [480p]
 ```
 
-You must define these profiles yourself in `mpv.conf` with the settings you prefer (shaders, deband, scaling, tone-mapping, etc.). The script only decides *which* profile to apply.
+You must define these profiles yourself in `mpv.conf` with the settings you prefer (shaders, deband, scaling, tone-mapping, etc.). The script only decides *which* profile to apply. Make sure to include `profile-restore=copy` inside your `[hdr]` profile so mpv can cleanly revert HDR settings when switching to SDR content.
 
 ### Special cases
 
@@ -1846,9 +1829,9 @@ When the actual audio bitrate is unavailable, the script uses these baseline val
 
 ## Sample OSD
 
-<img width="2676" height="966" alt="osd-1" src="https://github.com/user-attachments/assets/de6bd3b2-75a1-4ba7-a3b6-4a4a8ba20ed1" />
+<img width="2852" height="966" alt="osd-1" src="https://github.com/user-attachments/assets/b80971e9-a506-4317-826c-452850c8fda8" />
 
-<img width="2676" height="966" alt="osd-2" src="https://github.com/user-attachments/assets/00cee77b-7f3c-4d31-b812-1dcdda3a826f" />
+<img width="2852" height="907" alt="osd-2" src="https://github.com/user-attachments/assets/af96d5a2-b733-4d7c-bc6c-a494593edd27" />
 
 ## Sample Profiles for mpv.conf (e.g., for my 1080p Projector)
 
@@ -1857,6 +1840,7 @@ When the actual audio bitrate is unavailable, the script uses these baseline val
 
 ```ini
 [hdr]
+profile-restore=copy
 tone-mapping=mobius
 hdr-compute-peak=yes
 tone-mapping-param=0.01
