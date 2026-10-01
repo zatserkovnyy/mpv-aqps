@@ -17,7 +17,7 @@ On every file load the script:
 4. Selects and applies one of the quality profiles listed below.
 5. Detects special sources (YouTube, DVD, custom `hdtv` files) and applies dedicated profiles.
 6. Shows a rich custom OSD (toggled with `HOME` key) containing:
-   - File name, media title, or intelligent network stream name (e.g., YouTube/HLS)
+   - File name (for local files) or media title / intelligent stream name (for network streams, e.g., YouTube/HLS)
    - System clock, playback position, progress (%), total duration, remaining time, and exact playback end time (ETA)
    - Video resolution, FPS, bit depth, codec, hardware decoder / pixel format (e.g., `vulkan:p010` or `yuv420p`), and current playback bitrate
    - Audio track details (language, title, readable codec, channels, bitrate, and track index/total)
@@ -625,7 +625,6 @@ When switching back to SDR (or loading special sources like YouTube, DVD, or HDT
 
 ```text
 apply-profile hdr restore
-apply-profile default
 ```
 
 HDR changes are handled dynamically through mpv property observers.
@@ -1149,7 +1148,7 @@ The script resets:
 - Cartoon state
 - FPS correction state
 
-It also restores the `hdr` profile (if active), applies `default`, clears:
+It also restores the `hdr` profile (if active), resets `linear-downscaling` to its initial state, clears:
 
 ```text
 deband
