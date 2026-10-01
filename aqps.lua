@@ -2,7 +2,7 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.2.5
+-- Version: 1.3.0
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
@@ -140,6 +140,8 @@ local default_state = {
     osd_video_line_suffix = "",
     osd_audio_line = "",
     osd_subs_line = "",
+    osd_tonemapping_line = "",
+    osd_lut_line = "",
     osd_profile_line = "",
     osd_deband_line = "",
     osd_shader_line = "",
@@ -166,11 +168,15 @@ local quality_profile_cache = {}
 
 -- Find the ffprobe executable path
 local function find_ffprobe()
+    local function is_valid(r)
+        return r and r.status == 0 and (not r.error_string or r.error_string == "")
+    end
+
     local res = utils.subprocess({
         args = {"ffprobe", "-version"},
         cancellable = false
     })
-    if res and not res.error_string then
+    if is_valid(res) then
         return "ffprobe"
     end
 
@@ -185,7 +191,7 @@ local function find_ffprobe()
             args = {path, "-version"},
             cancellable = false
         })
-        if r and not r.error_string then
+        if is_valid(r) then
             return path
         end
     end
@@ -279,7 +285,7 @@ local function calculate_audio_bitrate(track)
         return DEFAULT_AUDIO_BITRATE
     end
 
-    local br = tonumber(track.bit_rate)
+    local br = tonumber(track["demux-bitrate"])
 
     if br and br > 0 then
         return br / 1e6
@@ -288,8 +294,8 @@ local function calculate_audio_bitrate(track)
     local codec = (track.codec or ""):lower()
     local c_profile = (track["codec-profile"] or ""):lower()
     local full_codec = codec .. " " .. c_profile
-    local channels = tonumber(track["audio-channels"]) or tonumber(track["demux-channels"]) or 2
-    local sr = tonumber(track["sample-rate"]) or 48000
+    local channels = tonumber(track["demux-channel-count"]) or tonumber(track["audio-channels"]) or 2
+    local sr = tonumber(track["demux-samplerate"]) or 48000
     local freq_factor = sr / 48000
     local abr = nil
 
@@ -355,126 +361,83 @@ end
 -- VIDEO ANALYSIS
 -- ======================================
 
--- Fetch video bitrate and FPS using ffprobe
+-- Fetch video bitrate, FPS, and audio stream bitrates using ffprobe
 local function get_video_bitrate_and_fps(path)
     local c = ffprobe_cache[path]
 
     if c and os.time() - (c.last_checked or 0) < FFPROBE_CACHE_SEC then
-        return c.v_bitrate, c.v_fps
+        return c.v_bitrate, c.v_fps, c.a_bitrates
     end
 
     local size = mp.get_property_number("file-size") or 0
 
-    if path:match("^https?://") or size == 0 then
+    if path:match("^https?://") then
         ffprobe_cache[path] = {
             v_bitrate = nil,
             v_fps = nil,
+            a_bitrates = nil,
             last_checked = os.time()
         }
-        return nil, nil
+        return nil, nil, nil
+    elseif size == 0 then
+        return nil, nil, nil
     end
 
     local res = utils.subprocess({
-        args = {ffprobe_path, "-v", "error", "-select_streams", "v:0", "-show_entries",
-                "stream=bit_rate,r_frame_rate:stream_tags=BPS", "-of", "json", path},
+        args = {ffprobe_path, "-v", "error", "-show_entries", "stream=codec_type,bit_rate,r_frame_rate:stream_tags=BPS",
+                "-of", "json", path},
         cancellable = false
     })
 
     local ok, json = pcall(utils.parse_json, res and res.stdout or "")
-    local s = (ok and json and json.streams and json.streams[1]) or nil
+    local streams = (ok and json and json.streams) or nil
 
-    if not s then
+    if not streams then
         mp.msg.error("FFprobe JSON error for " .. path)
         ffprobe_cache[path] = {
             v_bitrate = nil,
             v_fps = nil,
+            a_bitrates = nil,
             last_checked = os.time()
         }
-        return nil, nil
+        return nil, nil, nil
     end
 
-    local br = tonumber(s.bit_rate or (s.tags and s.tags.BPS))
-    local fps
+    local v_br, fps
+    local a_bitrates = {}
+    local a_idx = 0
 
-    if s.r_frame_rate then
-        local n, d = s.r_frame_rate:match("(%d+)/(%d+)")
-        n, d = tonumber(n), tonumber(d)
-
-        if n and d and d ~= 0 then
-            fps = n / d
+    for _, s in ipairs(streams) do
+        local br = tonumber(s.bit_rate or (s.tags and s.tags.BPS))
+        if s.codec_type == "video" and not v_br then
+            v_br = br and math.max(br / 1e6, 0) or nil
+            if s.r_frame_rate then
+                local n, d = s.r_frame_rate:match("(%d+)/(%d+)")
+                n, d = tonumber(n), tonumber(d)
+                if n and d and d ~= 0 then
+                    fps = n / d
+                end
+            end
+        elseif s.codec_type == "audio" then
+            a_idx = a_idx + 1
+            if br and br > 0 then
+                a_bitrates[a_idx] = br / 1e6
+            end
         end
     end
 
     ffprobe_cache[path] = {
-        v_bitrate = br and math.max(br / 1e6, 0) or nil,
+        v_bitrate = v_br,
         v_fps = fps,
+        a_bitrates = a_bitrates,
         last_checked = os.time()
     }
 
-    return ffprobe_cache[path].v_bitrate, ffprobe_cache[path].v_fps
+    return v_br, fps, a_bitrates
 end
 
 -- ======================================
 -- HDR DETECTION
--- ======================================
-
--- Detect HDR type and apply corresponding profile
-local function update_hdr_profile()
-    if not state.hdr_enabled then
-        state.hdr_type = ""
-        state.osd_hdr_text = ""
-        return false
-    end
-
-    local v_out = mp.get_property_native("video-out-params")
-    if not v_out then
-        return false
-    end
-
-    local gamma = (v_out.gamma or ""):lower()
-    local prim = (v_out.primaries or ""):lower()
-    local cm = (v_out.colormatrix or ""):lower()
-    local dv = mp.get_property_native("video-out-params/dolby-vision") or ""
-    local h10p = mp.get_property_native("video-out-params/hdr10-plus") or ""
-    local hdr_type = ""
-
-    if gamma == "hlg" then
-        hdr_type = cm:find("hlg10") and "HLG10" or "HLG"
-    elseif gamma == "pq" or prim == "bt.2020" then
-        if dv ~= "" or cm:find("dv") or cm:find("dolby") then
-            hdr_type = "Dolby Vision"
-        elseif h10p ~= "" or cm:find("hdr10%+") then
-            hdr_type = "HDR10+"
-        elseif cm:find("sl%-hdr") then
-            hdr_type = "SL-HDR"
-        elseif cm:find("technicolor") then
-            hdr_type = "Technicolor HDR"
-        else
-            hdr_type = "HDR10"
-        end
-    end
-
-    if hdr_type ~= state.hdr_type then
-        state.hdr_type = hdr_type
-        if hdr_type ~= "" then
-            state.osd_hdr_text = " " .. hdr_type
-            state.hdr_active = true
-            mp.commandv("apply-profile", "hdr")
-            mp.msg.info("HDR detected: " .. hdr_type .. ", applying profile")
-        else
-            state.osd_hdr_text = " SDR"
-            state.hdr_active = false
-            mp.commandv("apply-profile", "default")
-            mp.msg.info("No HDR detected, resetting profile")
-        end
-        return true
-    end
-
-    return false
-end
-
--- ======================================
--- VIDEO METRICS NORMALIZATION
 -- ======================================
 
 -- Get the currently selected video track
@@ -489,6 +452,70 @@ local function get_video_track()
 
     return nil
 end
+
+-- Detect HDR type and apply corresponding profile
+local function update_hdr_profile()
+    if not state.hdr_enabled then
+        local changed = state.hdr_active or (state.hdr_type ~= "")
+        if state.hdr_active then
+            mp.commandv("apply-profile", "hdr", "restore")
+            mp.commandv("apply-profile", "default")
+            state.hdr_active = false
+        end
+        state.hdr_type = ""
+        state.osd_hdr_text = ""
+        return changed
+    end
+
+    local v_out = mp.get_property_native("video-out-params") or mp.get_property_native("video-params")
+    if not v_out then
+        return false
+    end
+
+    local gamma = (v_out.gamma or ""):lower()
+    local cm = (v_out.colormatrix or ""):lower()
+    local vt = get_video_track() or {}
+    local hdr_type = ""
+
+    if gamma == "hlg" then
+        hdr_type = "HLG"
+    elseif gamma == "pq" or cm:find("dolby") or cm:find("dv") then
+        if vt["dolby-vision-profile"] or cm:find("dolby") or cm:find("dv") then
+            hdr_type = "Dolby Vision"
+        elseif v_out["scene-max-r"] then
+            hdr_type = "HDR10+"
+        else
+            hdr_type = "HDR10"
+        end
+    end
+
+    local new_active = (hdr_type ~= "")
+    if hdr_type ~= state.hdr_type or new_active ~= state.hdr_active or state.osd_hdr_text == "" then
+        local was_active = state.hdr_active
+        state.hdr_type = hdr_type
+        state.hdr_active = new_active
+
+        if new_active then
+            state.osd_hdr_text = " " .. hdr_type
+            mp.commandv("apply-profile", "hdr")
+            mp.msg.info("HDR detected: " .. hdr_type .. ", applying profile")
+        else
+            state.osd_hdr_text = " SDR"
+            if was_active then
+                mp.commandv("apply-profile", "hdr", "restore")
+            end
+            mp.commandv("apply-profile", "default")
+            mp.msg.info("No HDR detected, resetting profile")
+        end
+        return true
+    end
+
+    return false
+end
+
+-- ======================================
+-- VIDEO METRICS NORMALIZATION
+-- ======================================
 
 -- Retrieve video codec and bit depth
 local function get_video_codec_and_depth()
@@ -509,7 +536,7 @@ local function get_video_codec_and_depth()
     end
 
     if not depth then
-        local pf = (vo.pixelformat or vp.pixelformat or ""):lower()
+        local pf = (vo["hw-pixelformat"] or vp["hw-pixelformat"] or vo.pixelformat or vp.pixelformat or ""):lower()
 
         if pf:match("p010") or pf:match("10le") or pf:match("10be") then
             depth = 10
@@ -641,27 +668,31 @@ end
 -- Estimate base video bitrate handling audio subtraction and cartoons
 local function estimate_input_video_bitrate(path)
     local ftype = get_special_file_type(state.video_path or "")
-    local duration = mp.get_property_number("duration") or 0
-    local size = mp.get_property_number("file-size") or 0
-    local tracks = mp.get_property_native("track-list") or {}
-    local audio_sum = 0
-
-    for _, t in ipairs(tracks) do
-        if t.type == "audio" and not t.external then
-            audio_sum = audio_sum + get_cached_audio_bitrate(t)
-        end
-    end
-
-    local v_bitrate, v_fps = get_video_bitrate_and_fps(path)
+    local v_bitrate, v_fps, ff_a_bitrates = get_video_bitrate_and_fps(path)
     local source
 
     if ftype == "dvd" then
         v_bitrate, v_fps, source = nil, nil, "n/a"
     else
         if not v_bitrate or v_bitrate <= 0 then
+            local duration = mp.get_property_number("duration") or 0
+            local size = mp.get_property_number("file-size") or 0
+
             if duration > 0 and size > 0 then
-                local total = size * 8 / duration / 1e6
-                v_bitrate = math.max(math.min(math.max(total - audio_sum, total * 0.8, 0), 1000), 0.1)
+                local tracks = mp.get_property_native("track-list") or {}
+                local audio_sum = 0
+                local a_idx = 0
+
+                for _, t in ipairs(tracks) do
+                    if t.type == "audio" and not t.external then
+                        a_idx = a_idx + 1
+                        local track_br = (ff_a_bitrates and ff_a_bitrates[a_idx]) or get_cached_audio_bitrate(t)
+                        audio_sum = audio_sum + track_br
+                    end
+                end
+
+                local total = (size * 8 / duration / 1e6) * 0.995
+                v_bitrate = math.max(math.min(math.max(total - audio_sum, total * 0.2, 0), 1000), 0.1)
             end
             source = "calc"
         else
@@ -818,6 +849,7 @@ local function apply_video_quality_profile()
 
     local function apply_special(name, profile, extra)
         state.hdr_enabled = false
+        update_hdr_profile()
         state.display_profile = name
         state.profile_applied = true
 
@@ -833,9 +865,15 @@ local function apply_video_quality_profile()
     end
 
     if ftype == "youtube" then
-        local height = mp.get_property_number("height") or 0
-        local youtube_profile
+        state.hdr_enabled = false
+        update_hdr_profile()
 
+        local height = mp.get_property_number("height") or 0
+        if height == 0 then
+            return
+        end
+
+        local youtube_profile
         if height > 1440 then
             youtube_profile = "YouTube UHD"
         elseif height > 1080 then
@@ -872,6 +910,11 @@ local function apply_video_quality_profile()
     state.video_bitrate_source = source
     state.video_fps_actual = fps
     state.cartoon_multiplier = coeff
+
+    if not avg then
+        state.display_profile = "Default"
+        return
+    end
 
     local profile = determine_quality_profile(avg, height)
     state.display_profile = profile
@@ -913,8 +956,7 @@ local function format_eta_time(seconds_remaining)
         return "00:00"
     end
 
-    local t = os.date("*t", os.time() + math.floor(seconds_remaining))
-    return string.format("%02d:%02d", t.hour, t.min)
+    return os.date("%H:%M", os.time() + math.floor(seconds_remaining))
 end
 
 -- Get user-friendly audio codec name
@@ -997,7 +1039,7 @@ local function get_selected_tracks(tracks)
     local audio_cnt, sub_cnt = 0, 0
 
     for _, t in ipairs(tracks) do
-        if t.type == "audio" and not t.external then
+        if t.type == "audio" then
             audio_cnt = audio_cnt + 1
             if t.selected then
                 sel_audio, sel_audio_idx = t, audio_cnt
@@ -1071,16 +1113,14 @@ end
 
 -- Pre-generate static OSD elements (video, profile, shaders)
 local function generate_static_osd_info()
-    local v_in = mp.get_property_native("video-params") or {}
+    local v_in = mp.get_property_native("video-out-params") or mp.get_property_native("video-params") or {}
     local v_codec = (mp.get_property("video-codec") or "unknown"):upper()
     local dw, dh = mp.get_property_number("width", 0), mp.get_property_number("height", 0)
     local avg_bitrate = state.avg_video_bitrate
     local profile = state.display_profile or "Loading..."
-    local filename = (state.video_path or ""):lower()
-    local is_hdtv = filename:find("hdtv")
+    local hdr_label = " " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")
 
     state.video_name = get_video_name()
-    state.osd_hdr_text = " " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")
 
     local fps_val = determine_video_fps()
     if fps_val and fps_val > 0 then
@@ -1113,7 +1153,7 @@ local function generate_static_osd_info()
             state.osd_profile_line = "Profile: " .. build_profile_osd_string(profile)
         end
     else
-        state.osd_profile_line = string.format("Profile: %s%s [n/a]", profile, state.osd_hdr_text)
+        state.osd_profile_line = string.format("Profile: %s%s [n/a]", profile, hdr_label)
     end
 
     local tm_name = get_active_tonemapping_name()
@@ -1162,16 +1202,12 @@ local function generate_static_osd_info()
 
     local _, bit_depth = get_video_codec_and_depth()
     local bit_depth_text = bit_depth .. "-bit"
-    local pf_display
-    if v_in.pixelformat and not v_in.pixelformat:match("cuda|dxva2|d3d11|nvdec") then
-        pf_display = v_in.pixelformat
-    else
-        pf_display = mp.get_property("hwdec") or "sw"
-    end
+    local pf_display = v_in["hw-pixelformat"] and ((v_in.pixelformat or "hw") .. ":" .. v_in["hw-pixelformat"]) or
+                           v_in.pixelformat or "unknown"
 
-    state.osd_video_line_prefix = string.format("Video: %dx%d%s / %s / %s (%s) [", dw, dh, state.osd_fps_display,
+    state.osd_video_line_prefix = string.format("Video: %dx%d%s / %s / %s [%s @ ", dw, dh, state.osd_fps_display,
         bit_depth_text, v_codec, pf_display)
-    state.osd_video_line_suffix = " Mbps]"
+    state.osd_video_line_suffix = "]"
 end
 
 -- ======================================
@@ -1185,7 +1221,7 @@ local function generate_dynamic_osd_info()
 
     state.osd_audio_line = "Audio: none"
     if sel_audio then
-        local ch = tonumber(sel_audio["audio-channels"]) or tonumber(sel_audio["demux-channels"]) or 0
+        local ch = tonumber(sel_audio["demux-channel-count"]) or tonumber(sel_audio["audio-channels"]) or 0
         local chan_text = ch == 8 and "7.1" or ch == 6 and "5.1" or ch == 2 and "2.0" or ch == 1 and "1.0" or
                               tostring(ch) .. "ch"
 
@@ -1215,8 +1251,8 @@ local function display_osd()
         return
     end
 
-    local v_bitrate_text = state.video_bitrate and string.format("%.1f", math.floor(state.video_bitrate * 10) / 10) or
-                               "n/a"
+    local v_bitrate_text =
+        state.video_bitrate and string.format("%.1f Mbps", math.floor(state.video_bitrate * 10) / 10) or "n/a"
     local duration = mp.get_property_number("duration", 0)
     local time_pos = mp.get_property_number("time-pos", 0)
     local rem_real = mp.get_property_number("playtime-remaining", 0)
@@ -1294,6 +1330,14 @@ local function reset_state()
         state.osd_timer = nil
     end
 
+    if state.hdr_active then
+        mp.commandv("apply-profile", "hdr", "restore")
+    end
+
+    for k in pairs(state) do
+        state[k] = nil
+    end
+
     for k, v in pairs(default_state) do
         state[k] = v
     end
@@ -1301,6 +1345,7 @@ local function reset_state()
     audio_bitrate_cache = {}
     ffprobe_cache = {}
 
+    mp.commandv("apply-profile", "default")
     mp.set_property("deband", "no")
     mp.set_property_native("glsl-shaders", {})
     mp.set_osd_ass(0, 0, "")
@@ -1322,8 +1367,10 @@ end)
 mp.observe_property("audio-bitrate", "number", function(_, val)
     if type(val) == "number" and val > 0 then
         state.audio_bitrate_kbps = val / 1000
-        generate_dynamic_osd_info()
+    else
+        state.audio_bitrate_kbps = nil
     end
+    generate_dynamic_osd_info()
     if state.osd_visible then
         display_osd()
     end
@@ -1345,8 +1392,14 @@ mp.observe_property("sid", "string", function()
 end)
 
 -- Video
-mp.observe_property("video-out-params", "native", function()
-    if update_hdr_profile() then
+mp.observe_property("video-out-params", "native", function(_, val)
+    local hdr_changed = update_hdr_profile()
+
+    if not state.profile_applied then
+        apply_video_quality_profile()
+    end
+
+    if val or hdr_changed then
         generate_static_osd_info()
         if state.osd_visible then
             display_osd()
@@ -1357,6 +1410,8 @@ end)
 mp.observe_property("video-bitrate", "number", function(_, val)
     if type(val) == "number" and val > 0 then
         state.video_bitrate = val / 1e6
+    else
+        state.video_bitrate = nil
     end
     if state.osd_visible then
         display_osd()
@@ -1372,7 +1427,13 @@ mp.observe_property("target-lut", "string", function()
 end)
 
 -- Timing / Playback
-mp.observe_property("duration", "number", function()
+mp.observe_property("duration", "number", function(_, val)
+    if type(val) == "number" and val > 0 and not state.profile_applied and state.video_path then
+        apply_video_quality_profile()
+        if state.profile_applied then
+            generate_static_osd_info()
+        end
+    end
     if state.osd_visible then
         display_osd()
     end
@@ -1402,16 +1463,15 @@ end)
 
 mp.register_event("file-loaded", function()
     state.video_path = mp.get_property("path") or ""
+    state.hdr_enabled = (get_special_file_type(state.video_path) == nil)
     state.profile_applied = false
     state.display_profile = nil
     state.avg_video_bitrate = nil
     state.video_bitrate_source = nil
     state.video_fps_actual = nil
     state.cartoon_multiplier = 1.0
-    state.hdr_active = false
-    state.hdr_type = ""
-    state.osd_hdr_text = ""
 
+    update_hdr_profile()
     apply_video_quality_profile()
     generate_static_osd_info()
     generate_dynamic_osd_info()
