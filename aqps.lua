@@ -2,12 +2,13 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.3.0
+-- Version: 1.3.1
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
 local mp = require("mp")
 local utils = require("mp.utils")
+local initial_linear_downscaling = mp.get_property_native("linear-downscaling")
 
 -- ======================================
 -- CONSTANTS
@@ -119,7 +120,6 @@ local default_state = {
     video_name = "",
     video_fps_actual = nil,
     raw_video_bitrate = nil,
-    orig_video_bitrate = nil,
     video_bitrate = nil,
     avg_video_bitrate = nil,
     video_bitrate_source = nil,
@@ -213,19 +213,18 @@ end
 
 -- Extract video title or filename
 local function get_video_name()
-    local title = mp.get_property("media-title")
     local path = state.video_path or ""
-
-    if title and title ~= "" then
-        local t_lower = title:lower()
-        if not t_lower:match("m3u8") and not t_lower:match("googlevideo") and not t_lower:match("^https?://") then
-            return title
-        end
-    end
-
     local filename = path:match("[^/\\]+$") or "Unknown"
 
     if path:match("^https?://") then
+        local title = mp.get_property("media-title")
+        if title and title ~= "" then
+            local t_lower = title:lower()
+            if not t_lower:match("m3u8") and not t_lower:match("googlevideo") and not t_lower:match("^https?://") then
+                return title
+            end
+        end
+
         if path:match("youtube%.com") or path:match("youtu%.be") or path:match("googlevideo%.com") then
             return "YouTube Stream"
         elseif path:match("%.m3u8") then
@@ -384,8 +383,8 @@ local function get_video_bitrate_and_fps(path)
     end
 
     local res = utils.subprocess({
-        args = {ffprobe_path, "-v", "error", "-show_entries", "stream=codec_type,bit_rate,r_frame_rate:stream_tags=BPS",
-                "-of", "json", path},
+        args = {ffprobe_path, "-v", "error", "-show_entries",
+                "stream=codec_type,bit_rate,avg_frame_rate,r_frame_rate:stream_tags=BPS", "-of", "json", path},
         cancellable = false
     })
 
@@ -411,11 +410,16 @@ local function get_video_bitrate_and_fps(path)
         local br = tonumber(s.bit_rate or (s.tags and s.tags.BPS))
         if s.codec_type == "video" and not v_br then
             v_br = br and math.max(br / 1e6, 0) or nil
-            if s.r_frame_rate then
-                local n, d = s.r_frame_rate:match("(%d+)/(%d+)")
+            for _, rate in ipairs({s.avg_frame_rate or "", s.r_frame_rate or ""}) do
+                local n, d = rate:match("^(%d+)/(%d+)$")
                 n, d = tonumber(n), tonumber(d)
-                if n and d and d ~= 0 then
-                    fps = n / d
+
+                if n and d and d > 0 then
+                    local candidate = n / d
+                    if candidate > 0 and candidate <= 240 then
+                        fps = candidate
+                        break
+                    end
                 end
             end
         elseif s.codec_type == "audio" then
@@ -459,7 +463,6 @@ local function update_hdr_profile()
         local changed = state.hdr_active or (state.hdr_type ~= "")
         if state.hdr_active then
             mp.commandv("apply-profile", "hdr", "restore")
-            mp.commandv("apply-profile", "default")
             state.hdr_active = false
         end
         state.hdr_type = ""
@@ -504,7 +507,6 @@ local function update_hdr_profile()
             if was_active then
                 mp.commandv("apply-profile", "hdr", "restore")
             end
-            mp.commandv("apply-profile", "default")
             mp.msg.info("No HDR detected, resetting profile")
         end
         return true
@@ -523,10 +525,10 @@ local function get_video_codec_and_depth()
     local vp = mp.get_property_native("video-params") or {}
     local vo = mp.get_property_native("video-out-params") or {}
     local vt = get_video_track() or {}
-    local depth = tonumber(vp["bit-depth"]) or tonumber(vo["bit-depth"]) or tonumber(vt["bit-depth"])
+    local depth
 
     if not depth then
-        local profile = (vt["codec-profile"] or vt["profile"] or ""):lower()
+        local profile = (vt["codec-profile"] or ""):lower()
 
         if profile:find("10") then
             depth = 10
@@ -728,7 +730,6 @@ local function estimate_input_video_bitrate(path)
 
                 if fps_adjust_coeff > 1.0001 then
                     state.fps_adjust_coeff = fps_adjust_coeff
-                    state.orig_video_bitrate = v_bitrate
                     v_bitrate = v_bitrate / fps_adjust_coeff
                 end
             else
@@ -1057,31 +1058,23 @@ end
 
 -- Determine effective video frame rate
 local function determine_video_fps()
-    local fps = state.video_fps_actual
-
-    if fps and fps > 0 then
+    local fps = tonumber(state.video_fps_actual)
+    if fps and fps > 0 and fps <= 240 then
         return fps
     end
 
-    local v = mp.get_property_native("video-params") or {}
-    fps = tonumber(v.fps) or nil
-
-    if not fps and v.r_frame_rate then
-        local n, d = v.r_frame_rate:match("(%d+)/(%d+)")
-        n, d = tonumber(n), tonumber(d)
-        if n and d and d ~= 0 then
-            fps = n / d
-        end
+    local vt = get_video_track()
+    fps = vt and tonumber(vt["demux-fps"]) or nil
+    if fps and fps > 0 and fps <= 240 then
+        return fps
     end
 
-    if not fps then
-        local est = mp.get_property_number("estimated-vf-fps", 0)
-        if est and est > 0 then
-            fps = est
-        end
+    local est = mp.get_property_number("estimated-vf-fps", 0)
+    if est and est > 0 and est <= 240 then
+        return est
     end
 
-    return fps
+    return nil
 end
 
 -- Retrieve the active tone-mapping algorithm
@@ -1345,7 +1338,9 @@ local function reset_state()
     audio_bitrate_cache = {}
     ffprobe_cache = {}
 
-    mp.commandv("apply-profile", "default")
+    if initial_linear_downscaling ~= nil then
+        mp.set_property_native("linear-downscaling", initial_linear_downscaling)
+    end
     mp.set_property("deband", "no")
     mp.set_property_native("glsl-shaders", {})
     mp.set_osd_ass(0, 0, "")
@@ -1455,7 +1450,6 @@ mp.register_event("start-file", function()
     state.is_cartoon = false
     state.profile_applied = false
     state.fps_adjust_coeff = nil
-    state.orig_video_bitrate = nil
     state.avg_video_bitrate = nil
     state.raw_video_bitrate = nil
     quality_profile_cache = {}
