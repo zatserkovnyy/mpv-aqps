@@ -12,15 +12,15 @@ On every file load the script:
    - Codec efficiency (H.264, HEVC, AV1, VP9…)
    - Bit depth (8/10/12/16-bit)
    - HDR (HDR10, HDR10+, Dolby Vision, HLG…)
-   - Frame rate (corrects high-FPS content to a 24fps equivalent base)
+   - Frame rate (eligible videos are adjusted toward a 23.976 FPS reference)
    - Cartoon content (applies higher multiplier)
 4. Selects and applies one of the quality profiles listed below.
 5. Detects special sources (YouTube, DVD, custom `hdtv` files) and applies dedicated profiles.
-6. Shows a rich custom OSD (toggled with `HOME` key) containing:
+6. Shows a rich custom OSD (toggled with `HOMEPAGE` key) containing:
    - File name (for local files) or media title / intelligent stream name (for network streams, e.g., YouTube/HLS)
-   - System clock, playback position, progress (%), total duration, remaining time, and exact playback end time (ETA)
+   - System clock, playback position, progress (%), total duration, remaining time, and estimated playback end time (ETA)
    - Video resolution, FPS, bit depth, codec, hardware decoder / pixel format (e.g., `vulkan:p010` or `yuv420p`), and current playback bitrate
-   - Audio track details (language, title, readable codec, channels, bitrate, and track index/total)
+   - Audio track details (language, title, readable codec, channel count, bitrate, and track index/total)
    - Subtitle track details (language, title, format type, and track index/total)
    - Active tone-mapping algorithm
    - 3D LUT
@@ -164,7 +164,7 @@ MQ = 1.05
 LQ = 1.08
 ```
 
-The factor is selected according to the resolution and normalized bitrate.
+The factor is selected according to the resolution and normalized bitrate. For the 480p category, the script always uses the LQ factor (`1.08`).
 
 Conceptually:
 
@@ -222,7 +222,7 @@ Therefore, a 10-bit source receives a small positive adjustment compared with an
 
 The script has a special mechanism for animation.
 
-It searches the filename for predefined keywords, including:
+It searches the full video path, including parent folders, for predefined keywords, including:
 
 ```text
 futurama
@@ -234,7 +234,7 @@ gravity.falls
 spongebob
 ```
 
-If one of these strings is found in the filename, the video is classified as cartoon content.
+If one of these strings is found anywhere in the video path, including parent folders, the video is classified as cartoon content.
 
 Different multipliers are then applied depending on resolution:
 
@@ -307,7 +307,7 @@ The script also detects `Atmos` in the audio track title and adds an Atmos bitra
 
 Audio bitrate calculations are cached by track ID.
 
-> When the exact video bitrate cannot be extracted via FFprobe, the script calculates it by subtracting the audio bitrate from the total file bitrate (derived from file size and duration). Modern lossless audio tracks (like TrueHD Atmos or DTS-HD MA) can consume anywhere from 4 to 8 Mbps of bandwidth. If the script blindly used a standard 192 kbps fallback for everything, it would severely overestimate the video bitrate of files with heavy uncompressed audio, resulting in an artificially high quality classification. Accurately estimating the audio weight ensures the remaining video bitrate calculation remains precise.
+> When the exact video bitrate cannot be extracted via FFprobe, the script calculates it by subtracting the audio bitrate from the total file bitrate (derived from file size and duration). Modern lossless audio tracks (like TrueHD Atmos or DTS-HD MA) can consume anywhere from 4 to 8 Mbps of bandwidth. If the script blindly used a standard 192 kbps fallback for everything, it would severely overestimate the video bitrate of files with heavy uncompressed audio, resulting in an artificially high quality classification. Estimating the audio bitrate can improve the video bitrate estimate, but the result remains approximate and depends on the available metadata and codec-based estimates.
 
 ---
 
@@ -361,22 +361,27 @@ The estimated video bitrate is then calculated approximately as:
 
 ```text
 video_bitrate =
-    total_bitrate - sum_of_internal_audio_bitrates
+    clamp(
+        max(total_bitrate - sum_of_internal_audio_bitrates,
+            total_bitrate × 0.20),
+        0.1,
+        1000
+    ) Mbps
 ```
 
 The result is marked as an estimated value rather than an FFprobe value.
 
 The OSD uses a `~` prefix when the bitrate is estimated.
 
-> Relying strictly on FFprobe to read metadata is insufficient because many popular media containers (especially `.mkv` remuxes or web downloads) simply do not store average video bitrate tags in their headers. If the script only read metadata, it would fail to classify a massive portion of files. By mathematically deriving the total bitrate from the physical file size and duration—and then subtracting the audio weight—the script guarantees a highly accurate video bitrate reading even when the file's internal metadata is completely blank.
+> FFprobe may not provide the average video bitrate for some files. In that case, the script estimates it from the file size and duration, then subtracts the known or estimated audio bitrate. The result is kept between 20% of the total bitrate and 1000 Mbps, with a minimum of 0.1 Mbps. This is an estimate; its accuracy depends on the reported file size, duration, and audio bitrate estimates.
 
 ---
 
 # 9. Network Stream / YouTube Handling
 
-The script explicitly checks for `youtube.com` and `youtu.be` URLs. For these YouTube streams, it uses a separate profile-selection path and does not attempt to use FFprobe.
+The special YouTube/HLS path is triggered by `youtube.com`, `youtu.be`, `googlevideo.com`, and any path containing `.m3u8`. It selects a dedicated profile by video height and skips normal bitrate analysis.
 
-Regular HTTP/HTTPS network streams (such as direct links, Plex, or Jellyfin) are now treated as standard files, allowing the script to accurately estimate their bitrate instead of blindly applying YouTube profiles.
+Other HTTP/HTTPS streams use the regular profile-selection path, but FFprobe is skipped for all HTTP/HTTPS inputs. The script can estimate bitrate only when mpv provides a nonzero file size and duration. Otherwise, bitrate-based profile selection may be unavailable.
 
 ```text
 >1440p  → YouTube UHD
@@ -408,7 +413,9 @@ DVD
 
 as the profile.
 
-For DVD files, normal bitrate/FPS detection is disabled.
+The OSD labels this case `DVD`; the script applies the mpv profile `[dvd]`.
+
+The DVD branch skips FFprobe bitrate analysis and regular quality-profile selection. The OSD may still display FPS reported by mpv.
 
 
 ---
@@ -427,7 +434,7 @@ the script assigns the:
 hdtv
 ```
 
-profile.
+The OSD labels this case `HDTV`; the script applies the mpv profile `[hdtv]`.
 
 Bitrate and FPS information can still be collected for OSD/debugging purposes, but HDR processing is disabled for this special case.
 
@@ -470,14 +477,16 @@ The script uses approximately:
 
 as its reference frame rate.
 
-For videos with substantially higher FPS, it calculates:
+For eligible videos with FPS above the 23.976 FPS reference, it calculates:
 
 ```text
 fps_adjust_coeff =
     actual_fps / 23.976
 ```
 
-If the coefficient is greater than `1`, the bitrate is adjusted:
+The correction applies to cartoons and regular videos when bitrate and FPS are available and the source is not a special-source type. It is skipped for values within 0.01 FPS of 23.976 or 24.0, and when `fps_adjust_coeff` is not greater than `1.0001`.
+
+When FFprobe is available, FPS is read from the first video stream. The script tries `avg_frame_rate` first, then `r_frame_rate`; values above 240 FPS are ignored.
 
 ```text
 adjusted_bitrate =
@@ -506,7 +515,7 @@ for quality classification.
 
 This prevents high-frame-rate video from receiving an artificially high quality classification simply because it contains more frames per second.
 
-> Bitrate is measured per second, not per frame. If a standard 24fps movie and a 60fps video both share a bitrate of 10 Mbps, the 60fps encoder must stretch that exact same amount of data across 2.5 times as many frames. While modern inter-frame compression makes this relationship non-linear (you don't need 2.5x the bitrate for identical quality), a 60fps video is still significantly more compressed *per frame* than its 24fps counterpart. Normalizing the frame rate mathematically penalizes (deflates) the equivalent bitrate of HFR content, ensuring it is judged fairly against the script's standard 24/30fps quality thresholds.
+> Bitrate is measured per second, not per frame. If a standard 24fps movie and a 60fps video both share a bitrate of 10 Mbps, the 60fps encoder must stretch that exact same amount of data across 2.5 times as many frames. While modern inter-frame compression makes this relationship non-linear (you don't need 2.5x the bitrate for identical quality), a 60fps video is still significantly more compressed *per frame* than its 24fps counterpart. Normalizing the frame rate mathematically penalizes (deflates) the equivalent bitrate of HFR content, ensuring it is judged fairly against the script's 23.976 FPS reference.
 
 ---
 
@@ -527,7 +536,8 @@ normalized_bitrate =
 where:
 
 ```text
-fps_multiplier = 1 / fps_adjust_coeff
+fps_multiplier = 1 / fps_adjust_coeff when FPS correction applies;
+otherwise fps_multiplier = 1
 ```
 
 when FPS normalization is active.
@@ -541,13 +551,13 @@ normalized_bitrate =
     source_bitrate / codec_factor
 ```
 
-> This unified equation acts as the ultimate equalizer. Without it, a dynamic script would require hundreds of hardcoded thresholds to account for every possible combination of codec, framerate, bit depth, and HDR format. By mathematically distilling every conceivable video — whether it's a 60fps HDR game capture or a 10-bit HEVC anime — down to a single "reference" SDR 24fps equivalent, the script can confidently rely on just three simple baseline thresholds (HQ, MQ, LQ) to accurately judge the visual quality of an infinite variety of real-world media files.
+> This unified equation acts as the ultimate equalizer. Without it, a dynamic script would require hundreds of hardcoded thresholds to account for every possible combination of codec, framerate, bit depth, and HDR format. By mathematically distilling every conceivable video — whether it's a 60fps HDR game capture or a 10-bit HEVC anime — down to a single "reference" SDR 23.976 FPS equivalent, the script can confidently rely on just three simple baseline thresholds (HQ, MQ, LQ) to accurately judge the visual quality of an infinite variety of real-world media files.
 
 ---
 
 # 15. Quality Profile Selection
 
-After normalization, the script compares the resulting bitrate against the resolution-specific thresholds.
+After normalization, the script compares the resulting bitrate against the resolution-specific thresholds. Before comparison, the normalized bitrate is rounded to one decimal place.
 
 ## 2160p
 
@@ -641,7 +651,7 @@ It contains information such as:
 - Filename
 - FPS
 - Raw bitrate
-- Normalized bitrate
+- Adjusted average bitrate after cartoon/FPS correction; final codec/HDR/bit-depth normalization is calculated during profile selection
 - Bitrate source
 - HDR status
 - HDR type
@@ -699,7 +709,7 @@ The OSD displays information about the currently selected audio track:
 - Language
 - Title
 - Codec
-- Channel layout
+- Channel count, displayed in familiar notation where possible
 - Bitrate
 - Track number
 - Total number of audio tracks
@@ -759,7 +769,7 @@ Vorbis
 PCM
 ```
 
-If `Atmos` is detected in the track title, it is added to the displayed codec name.
+If `Atmos` appears in the file name, it is appended to the displayed codec name. Separately, the 0.512 Mbps Atmos bonus is added to the codec-based audio bitrate estimate when the audio track title contains `Atmos`.
 
 ---
 
@@ -1586,10 +1596,10 @@ This prevents parameters from the previous video from affecting the new one.
 In simplified pseudocode:
 
 ```text
-ON FILE LOADED:
-
+ON START-FILE:
     reset state
 
+ON FILE-LOADED:
     identify file type
 
     IF YouTube:
@@ -1600,7 +1610,6 @@ ON FILE LOADED:
 
     IF DVD:
         apply DVD profile
-        send dvd-detected message
         stop
 
     IF HDTV:
@@ -1620,7 +1629,7 @@ ON FILE LOADED:
     IF bitrate is unavailable:
         estimate bitrate from file size and duration
 
-    detect cartoon filename
+    detect cartoon keywords in the video path
 
     IF cartoon:
         apply animation multiplier
@@ -1701,7 +1710,7 @@ The main idea is that **raw bitrate is not treated as a universal measure of qua
 
 ### Automatically applied profiles
 
-The script looks for these exact profile names in your `mpv.conf`:
+The script calls these mpv profile names; define matching sections in `mpv.conf`:
 
 ```
 [hdr]
@@ -1739,7 +1748,7 @@ You must define these profiles yourself in `mpv.conf` with the settings you pref
 
 ## Requirements
 
-- **FFprobe** must be installed on your system.
+- **FFprobe is recommended.** It provides reported bitrate, FPS, and audio-stream metadata. Without it, local-file video bitrate may be estimated from file size and duration, but FPS normalization for profile selection is unavailable.
   - **Windows:** Place `ffprobe.exe` in the same folder as `mpv.exe` **or** add it to your system `PATH`.
   - **macOS / Linux:** Install via your package manager (e.g., `brew install ffmpeg` or `sudo apt install ffmpeg`). The script automatically detects `ffprobe` in standard locations (such as `/opt/homebrew/bin`, `/usr/local/bin`, or `/usr/bin`) even if your system `PATH` is not fully passed to the mpv GUI application.
 - Profiles listed above must exist in your `mpv.conf` (you define the actual settings inside them).
@@ -1755,10 +1764,10 @@ You must define these profiles yourself in `mpv.conf` with the settings you pref
 
 ## Hotkeys
 
-| Key        | Action                          |
-|------------|---------------------------------|
-| `HOME`     | Toggle detailed custom OSD      |
-| `MENU`     | Hide custom OSD + show stats    |
+| Key        | Action                                        |
+|------------|-----------------------------------------------|
+| `HOMEPAGE` | Toggle detailed custom OSD                    |
+| `MENU`     | Hide custom OSD if visible + toggle mpv stats |
 
 ## How the quality decision works
 
@@ -1809,7 +1818,7 @@ These multipliers reward higher color bit depths by slightly inflating their equ
 * **`BIT_DEPTH_MULTIPLIER`** (Default: 8-bit = `1.00`, 10-bit = `1.08`, 12-bit = `1.15`, 16-bit = `1.20`)
 
 ### Cartoon & Animation Detection
-Animated content typically requires less bitrate to look clean. The script applies a bonus multiplier if the filename matches specific keywords.
+Animated content typically requires less bitrate to look clean. The script applies a bonus multiplier if the video path contains one of these keywords.
 * **`CARTOON_SHOWS`**: A list of strings used to detect animated content (e.g., `"futurama"`, `"simpsons"`, `"south.park"`, `"gravity.falls"`).
 * **`CARTOON_MULTIPLIER`**: The resolution-specific bonus applied to detected cartoons (Default: 480p = `1.50`, 720p = `1.60`, 1080p = `1.70`, 2160p = `1.90`).
 
@@ -2023,7 +2032,7 @@ deband-grain=4
 * **Bring Your Own Shaders:** AQPS is a decision engine. It does not contain any built-in shaders or image enhancements. It simply instructs mpv to apply a specific profile (e.g., `[1080p-HQ]`). **You must define these profiles in your `mpv.conf`** for the script to have any visual effect.
 * **Filename Sensitivity:** Special profiles (`hdtv`) and the animation multiplier rely on reading the filename. If your files have stripped, scrambled, or renamed titles (e.g., `video1.mkv`), these specific detection features will be bypassed.
 * **Platform Compatibility:** This script is designed to be fully cross-platform (Windows, macOS, Linux). However, since I primarily develop on Windows and cannot currently test directly on macOS/Linux environments, please feel free to open an issue if you encounter any platform-specific bugs!
-* **External Audio & Streams:** External audio tracks and network streams are handled gracefully (bitrate estimation falls back mathematically when metadata is missing).
+* **External Audio & Streams:** External audio tracks are not included when subtracting audio bitrate in the video bitrate fallback. HTTP/HTTPS streams can use that fallback only when mpv reports a nonzero file size and duration; otherwise, bitrate-based profile selection may be unavailable.
 * **Keep FFprobe Updated:** For the most accurate bitrate and codec detection, ensure your `ffprobe` binary is up to date.
 
 If you encounter any bugs, errors, or have ideas on how to improve the script, please let me know! You can open an **Issue** here on GitHub or submit a **Pull Request**. I will gladly review your feedback and fix any problems.
