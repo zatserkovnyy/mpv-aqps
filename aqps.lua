@@ -2,7 +2,7 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.3.1
+-- Version: 1.3.2
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
@@ -721,7 +721,7 @@ local function estimate_input_video_bitrate(path)
         v_bitrate = v_bitrate * state.cartoon_multiplier
     end
 
-    if state.cartoon_multiplier == 1.0 and v_fps and v_bitrate and not ftype then
+    if v_fps and v_bitrate and not ftype then
         local fps_diff = math.abs(v_fps - 23.976) > 0.01 and math.abs(v_fps - 24.0) > 0.01
 
         if fps_diff then
