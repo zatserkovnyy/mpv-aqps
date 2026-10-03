@@ -709,7 +709,7 @@ The OSD displays information about the currently selected audio track:
 - Language
 - Title
 - Codec
-- Channel count, displayed in familiar notation where possible
+- Channel count
 - Bitrate
 - Track number
 - Total number of audio tracks
