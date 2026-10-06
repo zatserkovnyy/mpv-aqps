@@ -2,7 +2,7 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.3.2
+-- Version: 1.3.3
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
@@ -134,6 +134,7 @@ local default_state = {
     audio_codec_name = "",
     audio_output_format = "",
     audio_bitrate_kbps = nil,
+    vo_sig = nil,
     osd_visible = false,
     osd_timer = nil,
     osd_video_line_prefix = "",
@@ -155,12 +156,13 @@ for k, v in pairs(default_state) do
 end
 
 -- ======================================
--- CACHES
+-- CACHES & TIMERS
 -- ======================================
 
 local ffprobe_cache = {}
 local audio_bitrate_cache = {}
 local quality_profile_cache = {}
+local track_update_timer = nil
 
 -- ======================================
 -- FFPROBE INITIALIZATION
@@ -527,14 +529,11 @@ local function get_video_codec_and_depth()
     local vt = get_video_track() or {}
     local depth
 
-    if not depth then
-        local profile = (vt["codec-profile"] or ""):lower()
-
-        if profile:find("10") then
-            depth = 10
-        elseif profile:find("12") then
-            depth = 12
-        end
+    local profile = (vt["codec-profile"] or ""):lower()
+    if profile:find("10") then
+        depth = 10
+    elseif profile:find("12") then
+        depth = 12
     end
 
     if not depth then
@@ -725,15 +724,11 @@ local function estimate_input_video_bitrate(path)
         local fps_diff = math.abs(v_fps - 23.976) > 0.01 and math.abs(v_fps - 24.0) > 0.01
 
         if fps_diff then
-            if v_fps and v_fps > 0 then
-                local fps_adjust_coeff = v_fps / 23.976
+            local fps_adjust_coeff = v_fps / 23.976
 
-                if fps_adjust_coeff > 1.0001 then
-                    state.fps_adjust_coeff = fps_adjust_coeff
-                    v_bitrate = v_bitrate / fps_adjust_coeff
-                end
-            else
-                mp.msg.warn("FPS is zero or nil, skipping FPS adjustment")
+            if fps_adjust_coeff > 1.0001 then
+                state.fps_adjust_coeff = fps_adjust_coeff
+                v_bitrate = v_bitrate / fps_adjust_coeff
             end
         end
     end
@@ -749,7 +744,7 @@ local function determine_quality_profile(avg_bitrate, height)
 
     local width = mp.get_property_number("width") or 0
     local path = state.video_path or ""
-    local cache_key = path .. "_" .. tostring(width) .. "x" .. tostring(height)
+    local cache_key = path .. "_" .. tostring(width) .. "x" .. tostring(height) .. "_" .. tostring(state.hdr_active)
 
     if quality_profile_cache[cache_key] then
         return quality_profile_cache[cache_key]
@@ -786,12 +781,7 @@ local function build_profile_osd_string(profile)
     local avg_bitrate = state.avg_video_bitrate
     local video_bitrate_source = state.video_bitrate_source or "n/a"
     local prefix = (video_bitrate_source == "calc") and "~" or ""
-    local avg_text = avg_bitrate and fmt_bitrate(avg_bitrate) or "n/a"
     local osd_hdr_text = " " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")
-
-    if profile == "HDTV" then
-        return string.format("%s [%s%s Mbps @ %s]", profile, prefix, avg_text, video_bitrate_source)
-    end
 
     local x = state.raw_video_bitrate or 0
     local x_text = fmt_bitrate(x)
@@ -799,7 +789,7 @@ local function build_profile_osd_string(profile)
     local codec, bit_depth = get_video_codec_and_depth()
     local depth_mult = BIT_DEPTH_MULTIPLIER[bit_depth] or 1.00
     local codec_div = get_codec_equiv_factor(codec, dw, dh) or 1.0
-    local equiv = avg_bitrate / codec_div
+    local equiv = (avg_bitrate or 0) / codec_div
     local hdr_div = state.hdr_active and get_hdr_normalization_factor(equiv) or 1.0
     local cartoon_mult = state.cartoon_multiplier or 1.0
     local fps_mult = 1.0
@@ -1323,6 +1313,11 @@ local function reset_state()
         state.osd_timer = nil
     end
 
+    if track_update_timer then
+        track_update_timer:kill()
+        track_update_timer = nil
+    end
+
     if state.hdr_active then
         mp.commandv("apply-profile", "hdr", "restore")
     end
@@ -1337,6 +1332,7 @@ local function reset_state()
 
     audio_bitrate_cache = {}
     ffprobe_cache = {}
+    quality_profile_cache = {}
 
     if initial_linear_downscaling ~= nil then
         mp.set_property_native("linear-downscaling", initial_linear_downscaling)
@@ -1352,11 +1348,29 @@ end
 
 -- Audio
 mp.observe_property("audio-codec-name", "string", function(_, val)
-    state.audio_codec_name = (val or ""):lower()
+    local new_val = (val or ""):lower()
+    if new_val ~= state.audio_codec_name then
+        state.audio_codec_name = new_val
+        if state.video_path then
+            generate_dynamic_osd_info()
+            if state.osd_visible then
+                display_osd()
+            end
+        end
+    end
 end)
 
 mp.observe_property("audio-out-format", "string", function(_, val)
-    state.audio_output_format = (val or ""):lower()
+    local new_val = (val or ""):lower()
+    if new_val ~= state.audio_output_format then
+        state.audio_output_format = new_val
+        if state.video_path then
+            generate_dynamic_osd_info()
+            if state.osd_visible then
+                display_osd()
+            end
+        end
+    end
 end)
 
 mp.observe_property("audio-bitrate", "number", function(_, val)
@@ -1388,13 +1402,29 @@ end)
 
 -- Video
 mp.observe_property("video-out-params", "native", function(_, val)
-    local hdr_changed = update_hdr_profile()
-
-    if not state.profile_applied then
-        apply_video_quality_profile()
+    if not state.video_path then
+        return
     end
 
-    if val or hdr_changed then
+    local prev_hdr_active = state.hdr_active
+    local hdr_changed = update_hdr_profile()
+
+    if state.hdr_enabled and prev_hdr_active ~= state.hdr_active then
+        state.profile_applied = false
+    end
+
+    local profile_just_applied = false
+    if not state.profile_applied then
+        apply_video_quality_profile()
+        profile_just_applied = state.profile_applied
+    end
+
+    local new_vo_sig = val and string.format("%s_%s_%s_%s", tostring(val.w), tostring(val.h), tostring(val.pixelformat),
+        tostring(val["hw-pixelformat"])) or nil
+    local vo_changed = (new_vo_sig ~= state.vo_sig)
+    state.vo_sig = new_vo_sig
+
+    if hdr_changed or profile_just_applied or vo_changed then
         generate_static_osd_info()
         if state.osd_visible then
             display_osd()
@@ -1446,13 +1476,6 @@ end)
 
 mp.register_event("start-file", function()
     reset_state()
-    state.cartoon_multiplier = 1.0
-    state.is_cartoon = false
-    state.profile_applied = false
-    state.fps_adjust_coeff = nil
-    state.avg_video_bitrate = nil
-    state.raw_video_bitrate = nil
-    quality_profile_cache = {}
 end)
 
 mp.register_event("file-loaded", function()
@@ -1475,8 +1498,6 @@ mp.register_event("file-loaded", function()
     end
 end)
 
-local track_update_timer = nil
-
 mp.register_event("tracks-changed", function()
     audio_bitrate_cache = {}
 
@@ -1485,6 +1506,7 @@ mp.register_event("tracks-changed", function()
     end
 
     track_update_timer = mp.add_timeout(TRACK_UPDATE_DELAY_SEC, function()
+        track_update_timer = nil
         generate_dynamic_osd_info()
         if state.osd_visible then
             display_osd()
