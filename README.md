@@ -589,7 +589,7 @@ otherwise              → 720p-LQ
 480p
 ```
 
-The selected profile is cached using the file path and resolution.
+The selected profile is cached using the file path, resolution, and active HDR state.
 
 ---
 
@@ -695,7 +695,7 @@ Stores the calculated bitrate for individual audio tracks.
 Stores the selected profile based on:
 
 ```text
-file path + resolution
+file path + resolution + HDR state
 ```
 
 Caching prevents repeated calculations during playback.
@@ -1129,12 +1129,12 @@ changes, the script checks the HDR state again.
 
 If the HDR state changed, it:
 
-1. Updates the HDR state.
-2. Applies or removes the HDR profile.
-3. Regenerates static OSD information.
+1. Updates the HDR state and applies or restores the `hdr` profile.
+2. Re-evaluates the video quality profile if the active HDR state changed on a regular video.
+3. Regenerates static OSD information (also triggered when output dimensions or pixel formats change, while ignoring per-scene dynamic HDR metadata updates).
 4. Refreshes the visible OSD.
 
-This allows HDR changes to be handled dynamically during playback.
+This allows HDR and decoder output changes to be handled dynamically during playback without unnecessary OSD rebuilds.
 
 ---
 
@@ -1585,7 +1585,7 @@ Caches
 Timers
 ```
 
-It also clears previously active debanding and shaders.
+It also restores the `hdr` profile (if active), resets `linear-downscaling` to its initial value, and clears previously active debanding and shaders.
 
 This prevents parameters from the previous video from affecting the new one.
 
