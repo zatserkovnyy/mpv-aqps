@@ -2,7 +2,7 @@
 -- Script: aqps.lua
 -- Description: Adaptive Quality Profile Selector & Advanced OSD (AQPS) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.3.3
+-- Version: 1.3.4
 -- GitHub: https://github.com/zatserkovnyy/mpv-aqps
 -- =======================================================
 
@@ -405,12 +405,14 @@ local function get_video_bitrate_and_fps(path)
     end
 
     local v_br, fps
+    local video_seen = false
     local a_bitrates = {}
     local a_idx = 0
 
     for _, s in ipairs(streams) do
         local br = tonumber(s.bit_rate or (s.tags and s.tags.BPS))
-        if s.codec_type == "video" and not v_br then
+        if s.codec_type == "video" and not video_seen then
+            video_seen = true
             v_br = br and math.max(br / 1e6, 0) or nil
             for _, rate in ipairs({s.avg_frame_rate or "", s.r_frame_rate or ""}) do
                 local n, d = rate:match("^(%d+)/(%d+)$")
@@ -709,6 +711,8 @@ local function estimate_input_video_bitrate(path)
 
     local filename = state.video_path or ""
     state.is_cartoon = is_cartoon_content(filename)
+    state.cartoon_multiplier = 1.0
+    state.fps_adjust_coeff = nil
 
     if state.is_cartoon then
         local width = mp.get_property_number("width") or 0
@@ -1101,7 +1105,7 @@ local function generate_static_osd_info()
     local dw, dh = mp.get_property_number("width", 0), mp.get_property_number("height", 0)
     local avg_bitrate = state.avg_video_bitrate
     local profile = state.display_profile or "Loading..."
-    local hdr_label = " " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")
+    local hdr_label = state.hdr_enabled and (" " .. (state.hdr_type ~= "" and state.hdr_type or "SDR")) or ""
 
     state.video_name = get_video_name()
 
@@ -1374,18 +1378,22 @@ mp.observe_property("audio-out-format", "string", function(_, val)
 end)
 
 mp.observe_property("audio-bitrate", "number", function(_, val)
-    if type(val) == "number" and val > 0 then
-        state.audio_bitrate_kbps = val / 1000
-    else
-        state.audio_bitrate_kbps = nil
-    end
-    generate_dynamic_osd_info()
-    if state.osd_visible then
-        display_osd()
+    local new_kbps = (type(val) == "number" and val > 0) and math.floor(val / 1000) or nil
+    if new_kbps ~= state.audio_bitrate_kbps then
+        state.audio_bitrate_kbps = new_kbps
+        if state.video_path then
+            generate_dynamic_osd_info()
+            if state.osd_visible then
+                display_osd()
+            end
+        end
     end
 end)
 
 mp.observe_property("aid", "string", function()
+    if not state.video_path then
+        return
+    end
     generate_dynamic_osd_info()
     if state.osd_visible then
         display_osd()
@@ -1394,6 +1402,9 @@ end)
 
 -- Subtitles
 mp.observe_property("sid", "string", function()
+    if not state.video_path then
+        return
+    end
     generate_dynamic_osd_info()
     if state.osd_visible then
         display_osd()
@@ -1445,6 +1456,9 @@ end)
 
 -- 3dlut
 mp.observe_property("target-lut", "string", function()
+    if not state.video_path then
+        return
+    end
     generate_static_osd_info()
     if state.osd_visible then
         display_osd()
@@ -1454,6 +1468,7 @@ end)
 -- Timing / Playback
 mp.observe_property("duration", "number", function(_, val)
     if type(val) == "number" and val > 0 and not state.profile_applied and state.video_path then
+        update_hdr_profile()
         apply_video_quality_profile()
         if state.profile_applied then
             generate_static_osd_info()
